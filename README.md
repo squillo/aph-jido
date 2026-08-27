@@ -298,7 +298,7 @@ the first bullet below for why there are two):
 | Which extension this is | Receiver-registry binding of namespace `aph.notarization.v1`; the identifier does not travel | `Message.metadata` key `aph://extensions/notarization/v1`; the identifier *is* the key (§2) |
 | The envelope | Top-level `envelope_json` member — one escaped JSON string, envelope text verbatim | `metadata[uri].envelope` — envelope inline |
 | Authorized body bytes | Top-level `body_b64` member — base64 of the received bytes, verbatim; absent key = no body traveled | `metadata[uri].bodyRef` points at a message part, and its own note requires verbatim transport in a real deployment |
-| "You must present notarization" | Guard config `required: true` → reject and log | AgentCard `AgentExtension required: true` → reject and log (§3, §5) |
+| "You must present notarization" | Guard config `required: true` → reject and log the envelope-less signal | Recipient deployment policy REQUIRES APH and the AgentCard declares no APH extension → reject and log for audit (§5 step 5). `AgentExtension.required` (§3) is the *sender's* flag — whether the agent asks recipients to verify — and defaults to `false` in v0.1 |
 | Envelope-less traffic under a permissive policy | Guard `required: false` → pass through tagged unverified | §5 permissive flow: "Not notarized" indicator, deliver under existing trust rules |
 | Support discovery | Compile-time: the mounted plugin and registered extension *are* the declaration | Runtime: scan `agent_card.extensions[]` for the URI — no AgentCard exists on the jido rail |
 
