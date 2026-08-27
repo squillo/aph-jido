@@ -427,8 +427,9 @@ after.
 ## Repo hygiene
 
 [`scripts/hygiene_check.sh`](scripts/hygiene_check.sh) enforces two naming
-invariants over every git-tracked file. CI wires it in unchanged (PRD-001
-T15, not yet landed):
+invariants over every git-tracked file. The `core` job in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs it unchanged, with
+no arguments:
 
 1. **The retired domain appears nowhere.** No allowlist, no exceptions. The
    script assembles the forbidden string at runtime so its own source never
@@ -465,6 +466,7 @@ docs/a2a-carry-mapping.md                    the mapping, derived from the pinne
 docs/governance/                             the pre-production notification
 docs/transcripts/                            both committed transcripts
 scripts/hygiene_check.sh                     the naming gate, self-testable
+.github/workflows/ci.yml                     the two-job gate; only `core` is required
 demo/                                        two agents, two mix tasks, the TS sidecar
 PRDs/PRD-001-Jido-APH-Guard.md               the design record this repo implements
 ```
@@ -483,8 +485,8 @@ with `mix demo.run --out ../docs/transcripts/demo_run.txt` from `demo/`. It
 needs no Node and reaches no network. A golden-output test
 (`demo/test/demo_run_transcript_test.exs`) asserts the provenance banner, the
 verdict wording, `APH_E012`, `APH_E013`, and the honesty footer against real
-stdout; the core CI pipeline greps the same strings out of a live run
-(PRD-001 T15, not yet landed). The task is also a gate, not only a story: if
+stdout; the `core` CI job greps the same strings out of a live run
+(`.github/workflows/ci.yml`). The task is also a gate, not only a story: if
 the run departs from what the transcript narrates — a leg refusing at a
 different step than it declared, say — it prints a `DEVIATIONS` block and
 exits non-zero rather than publishing a tidy fiction.
@@ -939,8 +941,8 @@ from `demo/`. It requires Node and the built TS `dist/`; it still reaches no
 network. A `:deep`-tagged golden-output test
 (`demo/test/demo_deep_verify_transcript_test.exs`) asserts the pinned-`now`
 statement, the wall-clock refusal, the depth-split line, and the key-sourcing
-line against real stdout; the optional `:deep` CI job greps the same strings
-(PRD-001 T16, not yet landed).
+line against real stdout; the optional `deep` CI job greps the same strings
+(`.github/workflows/ci.yml`).
 
 Two notes on reading it. The bare words "verified" and "signed" appear freely
 here and that is correct — this leg *earned* them, having checked four Ed25519
@@ -1369,8 +1371,18 @@ The structural leg, which needs no Node and reaches no network:
 
 ## Status
 
-Pre-publish and private, blocked on the governance acknowledgment above. **No
-license has been chosen yet** — there is no `LICENSE` file in this repository,
+Pre-publish and private, blocked on the governance acknowledgment above.
+
+`.github/workflows/ci.yml` is committed and carries both jobs — `core gate (no
+Node)` and `deep leg (optional, Node >= 20)` — but **GitHub Actions has never
+executed it**: this repository has no remote yet, so every gate described above
+is a gate that exists, verified by local replay of the workflow's own steps, not
+a gate that has been observed green on Actions. When the remote lands, require
+the `core` check and nothing else; `deep` declares no `needs:` and nothing
+declares `needs: deep`, so it can be red, skipped, or deleted without touching
+the Node-free pipeline.
+
+**No license has been chosen yet** — there is no `LICENSE` file in this repository,
 so no license is granted; that is a deliberate blank to be filled before
 publish, not an oversight to read around.
 
