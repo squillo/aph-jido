@@ -5,12 +5,17 @@ An [APH](https://github.com/squillo/aph) notarization gate for
 let an agent act on a signal that carries no notarization envelope, plus a
 demo that is scrupulous about what that refusal actually proves.
 
-> **Community integration, not an agentjido package.** The `jido_` prefix
-> names what this integrates with, not who publishes it. Nothing here is
-> endorsed by, affiliated with, or maintained by the agentjido project or the
-> aph maintainers. The name itself is out for sign-off (see
-> [Governance](#governance) below), and the repository stays private until
-> that comes back.
+> **DRAFT — published for review, not for production use.** Every gate here is
+> real and every suite is green, but nothing in this repository has been
+> reviewed by anyone outside the project, no release is tagged, and the API may
+> change without notice. Read [Status](#status) before depending on any of it.
+
+> **Community integration, not an agentjido package.** The repository is named
+> `aph-jido` because this is APH's integration with jido; the Elixir package
+> keeps the name the code was built with, `:jido_aph`, so the two deliberately
+> differ. Nothing here is endorsed by, affiliated with, or maintained by the
+> agentjido project. See [Governance](#governance) for what the aph maintainer
+> has and has not ruled on.
 
 ---
 
@@ -422,13 +427,28 @@ wire facts, not after.
   `principal_signed_envelope.json`'s binding is equally real — its 427-byte body
   is tracked in the repo and hashes to the envelope's `bodySha256`. Reported
   rather than patched, because the aph repo is read-only to this project.
-- **Acknowledgment: PENDING.** No response is recorded yet.
+- **Acknowledgment: RECORDED 2026-08-27.** The aph maintainer, who owns this
+  repository, authorized publication and ruled on question (d) only. Precisely
+  what that covers:
+  - **Publication authorized** — public, in draft status, as
+    [`squillo/aph-jido`](https://github.com/squillo/aph-jido).
+  - **(d) Name settled: `aph-jido`** for the repository. Leading with `aph-`
+    rather than `jido_` is the point of the change: it names this as APH's
+    integration rather than something a reader could mistake for an agentjido
+    package. The Elixir application and its modules keep the names the code was
+    built with — `:jido_aph` and `JidoAph.*` — so repository name and package
+    name deliberately differ.
+  - **(a), (b) and (c) remain OPEN.** No ruling was given on BEAM-side
+    `:crypto.hash` for §8.3 step 8, on whether in-org shipping counts as
+    outside-the-repo, or on sibling-clone goldens versus vendored vectors.
+    They are recorded as unanswered rather than assumed: the design avoids (a)
+    regardless, and (c) still governs D7, so an answer to it can still change
+    how this repository consumes the corpus.
 
-**Publish is blocked on that acknowledgment.** The repository stays private
-until it is recorded here (PRD-001 T17), and the cross-repo pointer PR (T18)
-waits behind it. If a ruling flips a decision — the name (D2) or the corpus
-consumption pattern (D7) — the rework is filed as cards before publish, not
-after.
+**Publish is no longer blocked.** Publication is itself the disclosure the
+notification exists to make: the pre-production exception expires with it. The
+cross-repo pointer PR (PRD-001 T18) remains open work and is the aph
+maintainer's to accept or decline.
 
 ---
 
@@ -1379,20 +1399,28 @@ The structural leg, which needs no Node and reaches no network:
 
 ## Status
 
-Pre-publish and private, blocked on the governance acknowledgment above.
+**Draft, published for review.** Public since 2026-08-27 at
+[`squillo/aph-jido`](https://github.com/squillo/aph-jido). Draft means what it
+says: no release is tagged, no version is published to Hex, nothing here has
+been reviewed by anyone outside the project, and the library API may change
+without notice. It is published to be read and argued with, not to be depended
+on.
 
 `.github/workflows/ci.yml` is committed and carries both jobs — `core gate (no
-Node)` and `deep leg (optional, Node >= 20)` — but **GitHub Actions has never
-executed it**: this repository has no remote yet, so every gate described above
-is a gate that exists, verified by local replay of the workflow's own steps, not
-a gate that has been observed green on Actions. When the remote lands, require
-the `core` check and nothing else; `deep` declares no `needs:` and nothing
-declares `needs: deep`, so it can be red, skipped, or deleted without touching
-the Node-free pipeline.
+Node)` and `deep leg (optional, Node >= 20)`. **At the moment of publication,
+GitHub Actions had never executed it.** The repository had no remote until
+then, so every gate described above was verified by local replay of the
+workflow's own steps — a gate that exists and was exercised by hand, not a gate
+observed green on Actions. The first Actions run is the one triggered by the
+publishing push; read its result rather than this sentence. Require the `core`
+check and nothing else: `deep` declares no `needs:` and nothing declares
+`needs: deep`, so it can be red, skipped, or deleted without touching the
+Node-free pipeline.
 
-**No license has been chosen yet** — there is no `LICENSE` file in this repository,
-so no license is granted; that is a deliberate blank to be filled before
-publish, not an oversight to read around.
+**Licensed Apache-2.0** (`LICENSE`), matching
+[squillo/aph](https://github.com/squillo/aph). The guard and the extension are
+meant to be copied into other people's agents; a license that permits that is
+the point.
 
 See PRD-001 for scope, decisions, and the tasks that built this. The non-goals
 there are load-bearing, not throat-clearing: no new aph-ex ops, no cryptography
