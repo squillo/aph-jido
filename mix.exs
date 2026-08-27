@@ -9,10 +9,16 @@ defmodule JidoAph.MixProject do
       # declaring a newer one nobody has required. The toolchain actually
       # proven against this scaffold is recorded in README.md.
       elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
   end
+
+  # test/support holds test-only modules (the T6 corpus loader); they must
+  # never compile into the shipped library.
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   def application do
     [
