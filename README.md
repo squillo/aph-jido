@@ -5,7 +5,7 @@ An [APH](https://github.com/squillo/aph) notarization gate for
 let an agent act on a signal that carries no notarization envelope, plus a
 demo that is scrupulous about what that refusal actually proves.
 
-**▶ [Watch the explainer video](https://drive.google.com/file/d/13XWcTVQpHmRsPP4z73cvTcczk4N0VCY9/view?usp=drive_link)** — the integration in plain language, before this README makes it precise.
+**▶ [Watch the explainer video](https://drive.google.com/file/d/13XWcTVQpHmRsPP4z73cvTcczk4N0VCY9/view?usp=drive_link)** — what APH is, and how it works in the Elixir ecosystem for jido, in plain language before this README makes it precise.
 
 > **DRAFT — published for review, not for production use.** Every suite is
 > green, on this machine and on CI. What "draft" means here is everything else:
