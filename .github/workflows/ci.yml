@@ -1,8 +1,14 @@
 name: CI
 
-# The core pipeline is deliberately Node-free (PRD-001 T15). The optional
-# `:deep` job — the only place Node exists in this repository — is a separate
-# card (T16) and lands separately in this same file.
+# Two jobs, and the split is the point.
+#
+# `core` (PRD-001 T15) is deliberately Node-free and is the job that should be
+# the required check. `deep` (T16) is the OPTIONAL leg and the only place Node
+# exists in this repository. They carry different toolchains and fail for
+# different reasons, so they are separate jobs rather than steps in one — and
+# `core` declares no `needs:` on `deep`, so the deep leg being red, skipped, or
+# deleted outright cannot make the Node-free pipeline fail. That independence
+# is a PRD-001 acceptance-gate requirement (gate 7), not a convenience.
 #
 # Two checkouts, side by side under the workspace root:
 #
@@ -342,4 +348,248 @@ jobs:
             echo "::error::mix demo.run stdout contains the bare word 'verified'"
             missing=1
           fi
+          [ "$missing" -eq 0 ]
+
+  # ==========================================================================
+  # The optional deep leg (PRD-001 T16, acceptance gates 5 and 7).
+  #
+  # A SEPARATE job, and separate for reasons that outlive convenience:
+  #
+  #   - It carries a toolchain the core pipeline is defined not to have. The
+  #     core job goes as far as shadowing node on PATH so that "Node-free" is
+  #     a checkable fact; folding these steps into it would erase that.
+  #   - It fails differently. A red core job means the library or the demo is
+  #     wrong. A red deep job can also mean the sibling's TypeScript build
+  #     changed, or the pinned instant drifted out of a re-minted fixture's
+  #     window — different diagnosis, different owner, different urgency.
+  #   - It declares no `needs:`, and nothing declares `needs: deep`. Branch
+  #     protection should require `core` and nothing else, so this leg being
+  #     red, skipped, or removed can never fail the Node-free pipeline.
+  #
+  # What this job proves that the core job cannot: that a SECOND, independent
+  # implementation of APH v0.1 — built here from the sibling's TypeScript
+  # source at the same pinned SHA — reaches full §8.3 verification on the same
+  # golden the guard only ever called notarization-shaped.
+  # ==========================================================================
+  deep:
+    name: deep leg (optional, Node >= 20)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: jido_aph
+
+    steps:
+      - name: Check out jido_aph
+        uses: actions/checkout@v4
+        with:
+          path: jido_aph
+
+      - name: Check out the sibling aph clone at the pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APH_REPO }}
+          ref: ${{ env.APH_PIN }}
+          path: aph
+          persist-credentials: false
+
+      # Deliberately duplicated from the core job rather than shared. This job
+      # has no `needs:` — that is the whole design — so nothing guarantees the
+      # core job ran, let alone passed, before this one narrates the golden's
+      # validity window and byte counts as fact. A gate that only holds when
+      # some other job happened to run is not a gate. (GitHub Actions does not
+      # support YAML anchors, so the sharing that would remove the duplication
+      # is not available; a shared script would be a new file this card does
+      # not own.)
+      - name: Fixture drift gate (this job stands alone)
+        working-directory: aph
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$APH_PIN" ]; then
+            echo "::error::aph checkout is $head, expected the pin $APH_PIN"
+            exit 1
+          fi
+          echo "aph HEAD  $head"
+
+          sums="$RUNNER_TEMP/aph-fixtures.sha256"
+          {
+            printf '%s  %s\n' \
+              8a6015d873786b533fa00f16b3f789a7984be61d631d5cd9e3515f7c5e721466 \
+              examples/principal_signed_envelope.json
+            printf '%s  %s\n' \
+              dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb \
+              examples/principal_signed_body.txt
+          } > "$sums"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "$sums"
+          else
+            shasum -a 256 -c "$sums"
+          fi
+
+      # ----------------------------------------------------------------------
+      # Node 20, the declared FLOOR rather than the newest release.
+      #
+      # `interpreters/typescript/package.json` declares `engines.node: ">=20"`,
+      # and the sibling's own TypeScript workflow records why the floor is 20
+      # and not something older: Ed25519 in `crypto.subtle` arrived there, and
+      # every signature check in that implementation goes through SubtleCrypto.
+      # Local development proved this leg on Node v26.3.0; running the floor
+      # here means the two together are the evidence, and neither alone is.
+      # ----------------------------------------------------------------------
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # `npm install`, NOT `npm ci`, and that is upstream's decision rather
+      # than a shortcut taken here. The sibling commits no lockfile, on
+      # purpose — its own `interpreters/typescript/.gitignore` says so in as
+      # many words: "No lockfile is committed, and that is deliberate rather
+      # than an oversight: the only dependency in the tree is the TypeScript
+      # compiler, at dev time, and a lockfile would be a durable-looking
+      # record of a dependency graph this package's whole claim is that it
+      # does not have. CI installs with `npm install`." `npm ci` refuses to
+      # run without a lockfile, so it would fail on a fresh checkout every
+      # time.
+      - name: Install the TypeScript compiler (the only dependency)
+        working-directory: aph/interpreters/typescript
+        run: npm install --no-audit --no-fund
+
+      # dist/ is gitignored upstream, so it exists here only because this step
+      # built it, from source at the pinned SHA. That is the provenance the
+      # deep transcript's own banner says it cannot establish on a developer
+      # machine and hands to CI.
+      - name: Build dist/ from source at the pinned SHA
+        working-directory: aph/interpreters/typescript
+        run: npm run build
+
+      - name: Install Erlang/OTP and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29.0.5"
+          elixir-version: "1.20.3-otp-29"
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Record the toolchain this run actually used
+        run: |
+          set -euo pipefail
+          elixir --version
+          node --version
+          cargo --version
+
+      - name: demo — deps.get
+        working-directory: jido_aph/demo
+        run: mix deps.get
+
+      # Only the demo. The library has no `:deep`-tagged tests and owns no
+      # sidecar: `JidoAph.DeepVerifier` is a behaviour with no in-library
+      # implementation, which is the seam PRD-001 §7.1 is built around. The
+      # library's suite is the core job's business.
+      #
+      # Included-but-unavailable is a failure here, never a silent pass: the
+      # deep suite's first test asserts `TsSidecar.availability/0` and prints
+      # that function's setup story when it is not `:ok`. So this step also
+      # proves the npm build above actually produced a usable dist/.
+      - name: demo — the :deep-tagged suite
+        working-directory: jido_aph/demo
+        run: mix test --include deep
+
+      # ----------------------------------------------------------------------
+      # The deep transcript gate (PRD-001 acceptance gate 5, :deep half).
+      #
+      # `mix demo.deep_verify` is a gate as well as a story — it exits non-zero
+      # after a DEVIATIONS block when the run departs from what it narrates —
+      # so the command succeeding is already an assertion. The needles add the
+      # sentences the honesty contract turns on: that the instant is PINNED and
+      # said to be pinned, that wall clock really refuses, that the depth split
+      # is stated in the words the PRD chose, and that the key-sourcing story
+      # is told.
+      #
+      # There is deliberately NO bare-word check here, and the asymmetry with
+      # the core job is the point. This leg EARNED the words "verified" and
+      # "signed": four Ed25519 signatures over RFC 8785 canonicalization
+      # actually verified. Banning them would be as dishonest as the guard
+      # using them. The narrower rule — that the guard's own captured log lines
+      # inside this transcript still avoid them — is asserted by
+      # demo/test/demo_deep_verify_transcript_test.exs, which the step above
+      # runs.
+      # ----------------------------------------------------------------------
+      - name: mix demo.deep_verify, and the sentences CI will not let drift
+        working-directory: jido_aph/demo
+        env:
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/demo_deep_verify.stdout"
+          mix demo.deep_verify > "$out"
+          cat "$out"
+
+          needles=(
+            "[1] PROVENANCE"
+            "pinned now            2026-05-21T12:00:00Z"
+            '`now` is pinned because the window is fixed, not because time is negotiable.'
+            "APH_E003 (MandateExpired)"
+            "outside the envelope window"
+            "APH_E011 (PrincipalSignatureInvalid)"
+            "This is why structural validity is never called verification."
+            "One key handed in out of band, one that needs none, and zero fetched."
+            "[7] WHAT THIS LEG ADDS"
+            "[8] WHAT IT STILL DOES NOT DO"
+            "[9] HONESTY FOOTER"
+          )
+          missing=0
+          for needle in "${needles[@]}"; do
+            if grep -qF -- "$needle" "$out"; then
+              printf 'found  %s\n' "$needle"
+            else
+              echo "::error::mix demo.deep_verify stdout no longer contains: $needle"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      # PRD-001 acceptance gate 7's other half: when the leg is UNAVAILABLE the
+      # task must say so and exit non-zero, never shrug and print a transcript
+      # nobody earned. Pointed at a directory that is guaranteed not to be an
+      # aph clone, so the failure under test is the one being tested rather
+      # than an accident of the machine.
+      #
+      # KNOWN DEFECT, recorded here rather than patched from this card: the
+      # setup story this path prints says `npm ci && npm run build`, and `npm
+      # ci` cannot work against the sibling — upstream commits no lockfile, on
+      # purpose, and `npm ci` refuses to run without one. The build steps above
+      # therefore use `npm install`, matching the sibling's own TypeScript
+      # workflow. The message lives in demo/lib/demo/deep_verifier/
+      # ts_sidecar.ex (T12) with its wording pinned by T13's test, so the fix
+      # is a card of its own; the assertion below deliberately does not pin the
+      # wrong half.
+      - name: The unavailable path still refuses, loudly
+        working-directory: jido_aph/demo
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/deep_unavailable.stdout"
+          if mix demo.deep_verify --aph-repo "$RUNNER_TEMP/definitely-not-an-aph-clone" > "$out" 2>&1; then
+            cat "$out"
+            echo "::error::demo.deep_verify exited 0 with no aph clone; it must refuse"
+            exit 1
+          fi
+          cat "$out"
+          missing=0
+          for needle in \
+            "DEEP LEG UNAVAILABLE" \
+            "nothing was verified, and nothing is claimed" \
+            "interpreters/typescript" \
+            "npm run build" \
+            "mix demo.run"
+          do
+            if grep -qF -- "$needle" "$out"; then
+              printf 'found  %s\n' "$needle"
+            else
+              echo "::error::the unavailable path no longer says: $needle"
+              missing=1
+            fi
+          done
           [ "$missing" -eq 0 ]
