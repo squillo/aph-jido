@@ -88,8 +88,9 @@ defmodule Demo.DeepVerifier.TsSidecar do
     spot-checks four entry files, and a file that exists can still export
     nothing). A setup problem, never a verdict about an envelope.
   - `%{kind: :sidecar_failure}` — node ran and produced no response
-    document, or threw something that is not one of the verifier's own error
-    classes. Also never a verdict.
+    document, threw something that is not one of the verifier's own error
+    classes, or overran its `:timeout` and was killed (`exit_status:
+    :timeout`). Also never a verdict.
 
   The separation is load-bearing rather than tidy: a broken build used to
   come back as `%{kind: :refusal, code: nil}`, which is exactly the shape of
@@ -129,7 +130,10 @@ defmodule Demo.DeepVerifier.TsSidecar do
   - `:aph_repo_path` — override the sibling clone location; defaults to
     `Demo.Corpus.repo_path!/0`.
   - `:timeout` — subprocess wall-clock budget in ms (default
-    `#{@default_timeout_ms}`).
+    `#{@default_timeout_ms}`), enforced: on expiry the OS process is killed
+    and the call returns `%{kind: :sidecar_failure, exit_status: :timeout}`.
+    The budget is absolute, not per-write, so a chatty subprocess cannot
+    renew it.
 
   `:keys` is rejected: this sidecar pins its own single-entry key map (see
   the moduledoc).
@@ -157,6 +161,14 @@ defmodule Demo.DeepVerifier.TsSidecar do
         aph_repo_path: nil,
         timeout: @default_timeout_ms
       )
+
+    timeout = Keyword.fetch!(opts, :timeout)
+
+    unless is_integer(timeout) and timeout > 0 do
+      raise ArgumentError,
+            "#{inspect(__MODULE__)} :timeout must be a positive integer in ms, " <>
+              "got: #{inspect(timeout)}"
+    end
 
     now = Keyword.fetch!(opts, :now)
 
@@ -340,18 +352,85 @@ defmodule Demo.DeepVerifier.TsSidecar do
         })
       )
 
-      {output, status} =
-        System.cmd(node_bin, [script_path(), request_path, response_path],
-          stderr_to_stdout: true,
-          cd: dir
-        )
+      case run_node(node_bin, [script_path(), request_path, response_path], dir, opts[:timeout]) do
+        {:exited, output, status} ->
+          case File.read(response_path) do
+            {:ok, body} -> decode_response(body, now, opts, repo)
+            {:error, _} -> sidecar_failure(status, output)
+          end
 
-      case File.read(response_path) do
-        {:ok, body} -> decode_response(body, now, opts, repo)
-        {:error, _} -> sidecar_failure(status, output)
+        {:timeout, output} ->
+          sidecar_failure(
+            :timeout,
+            output,
+            "the node sidecar exceeded its #{opts[:timeout]}ms budget and was killed; " <>
+              "this is a tooling failure, not a verdict about the envelope"
+          )
       end
     after
       File.rm_rf(dir)
+    end
+  end
+
+  # Why a Port and not System.cmd/3: System.cmd has no timeout, so the
+  # documented `:timeout` budget was decoration. Measured before this existed
+  # — a sidecar whose verifyEnvelope never resolves, with `timeout: 500`, was
+  # still blocked at 6s; brutal-killing the calling task did not kill the node
+  # child, which outlived the VM's `after File.rm_rf(dir)` still holding the
+  # temp dir with the envelope and base64 body in it. In CI's :deep job that
+  # is a job that hangs to the platform limit instead of failing with a
+  # message someone can act on.
+  #
+  # The deadline is absolute rather than per-message: a chatty subprocess must
+  # not be able to renew its own budget one write at a time.
+  defp run_node(node_bin, args, dir, timeout) do
+    port =
+      Port.open({:spawn_executable, node_bin}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        :hide,
+        args: args,
+        cd: dir
+      ])
+
+    os_pid = port |> Port.info(:os_pid) |> elem(1)
+    collect(port, os_pid, System.monotonic_time(:millisecond) + timeout, [])
+  end
+
+  defp collect(port, os_pid, deadline, acc) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {^port, {:data, data}} ->
+        collect(port, os_pid, deadline, [data | acc])
+
+      {^port, {:exit_status, status}} ->
+        {:exited, IO.iodata_to_binary(Enum.reverse(acc)), status}
+    after
+      remaining ->
+        # Closing the port is not enough: the OS process is not a child of the
+        # BEAM's own lifecycle here, and it demonstrably survives. Kill it by
+        # pid, then close, then drain whatever the port already queued.
+        System.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
+        close_port(port)
+        {:timeout, IO.iodata_to_binary(Enum.reverse(acc))}
+    end
+  end
+
+  defp close_port(port) do
+    if Port.info(port) != nil, do: Port.close(port)
+  rescue
+    ArgumentError -> :ok
+  after
+    flush_port(port)
+  end
+
+  defp flush_port(port) do
+    receive do
+      {^port, _} -> flush_port(port)
+    after
+      0 -> :ok
     end
   end
 

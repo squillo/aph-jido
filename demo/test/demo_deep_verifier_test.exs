@@ -317,6 +317,61 @@ defmodule Demo.DeepVerifierTest do
     assert error.message =~ "verifyEnvelope"
   end
 
+  # Why: `:timeout` was documented, validated and never used — System.cmd/3
+  # has no timeout, and nothing read the option. Measured before the fix: a
+  # sidecar whose verifyEnvelope never resolves, called with `timeout: 500`,
+  # was still blocked at 6s; brutal-killing the calling task left the node
+  # child running, outliving the `after File.rm_rf(dir)` that should have
+  # removed the temp dir holding the envelope and base64 body. In CI's :deep
+  # job that is a job that hangs to the platform limit rather than failing
+  # with something actionable. This pins all three properties: the budget is
+  # honoured, the failure is a TOOLING failure (never a verdict), and the OS
+  # process does not outlive it.
+  #
+  # The fixture must hold node's event loop open — node detects an unsettled
+  # top-level await and exits on its own, which is not the hang being tested.
+  @tag :deep
+  test "verify/2 enforces its :timeout budget and leaves no orphan process" do
+    repo = Path.join(System.tmp_dir!(), "jido_aph_hang_#{System.unique_integer([:positive])}")
+    dist = Path.join([repo, "interpreters", "typescript", "dist"])
+    on_exit(fn -> File.rm_rf(repo) end)
+
+    File.mkdir_p!(Path.join(dist, "src"))
+    File.mkdir_p!(Path.join(dist, "testkit"))
+
+    File.write!(
+      Path.join([dist, "src", "verify.js"]),
+      "setInterval(() => {}, 1000);\nexport const verifyEnvelope = () => new Promise(() => {});\n"
+    )
+
+    File.write!(Path.join([dist, "src", "didkey.js"]), "export const isDidKey = () => false;\n")
+    File.write!(Path.join([dist, "src", "types.js"]), "export const proofsOf = () => [];\n")
+
+    File.write!(
+      Path.join([dist, "testkit", "vectors.js"]),
+      "export const RFC8032_TEST_3 = {};\nexport const ed25519KeyMaterial = () => ({});\n"
+    )
+
+    started = System.monotonic_time(:millisecond)
+
+    assert {:error, error} =
+             TsSidecar.verify(golden(), now: @pinned_now, aph_repo_path: repo, timeout: 800)
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    # Bounded generously: the claim is that the budget is enforced at all, not
+    # that it is precise to the millisecond.
+    assert elapsed < 10_000
+
+    assert error.kind == :sidecar_failure
+    assert error.exit_status == :timeout
+    assert error.message =~ "not a verdict about the envelope"
+
+    # And the child is really dead, not merely disowned — the half that a
+    # port-close alone does not achieve.
+    assert {_, 1} = System.cmd("pgrep", ["-f", "jido_aph_deep_"], stderr_to_stdout: true)
+  end
+
   # Why: THE DEPTH-SPLIT BEAT — the single test PRD-001 §8's honesty contract
   # rests on, and the reason "structurally valid" is never written as
   # "verified" anywhere in this repository.
