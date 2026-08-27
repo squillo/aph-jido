@@ -63,18 +63,19 @@ defmodule JidoAph.GuardTest do
   end
 
   # Why: spec §7.1.7.1 — canonicalization happens on unauthenticated input,
-  # so the byte bound must be enforced BEFORE any parse. The variant proves
-  # the ordering from the outside: golden bytes padded with trailing
-  # whitespace still satisfy the strict parser (asserted first), so the
-  # guard's refusal of the same bytes can only come from the pre-parse size
-  # gate. The refusal is guard-authored: no APH code, because no protocol
-  # rule was reached.
-  test "oversize envelope refused before any parse, no APH code" do
+  # so the byte bound must be enforced BEFORE any parse. This test pins
+  # ATTRIBUTION, not ordering: golden bytes padded with trailing whitespace
+  # still satisfy the strict parser (asserted first), so the guard's refusal
+  # of the same bytes can only have come from the size gate. WHICH STEP RAN
+  # FIRST is a separate claim needing separate bytes — the test below is the
+  # one that catches a hoisted parse. The refusal is guard-authored: no APH
+  # code, because no protocol rule was reached.
+  test "oversize envelope refused by the size gate, not the parser, with no APH code" do
     padded = golden() <> String.duplicate(" ", 70_000)
     assert byte_size(padded) > Guard.max_envelope_bytes()
 
     # The parser itself would ADMIT these bytes — whitespace padding does
-    # not disturb strict parsing — so a size refusal is provably pre-parse.
+    # not disturb strict parsing — so the refusal is the size gate's alone.
     assert {:ok, _} = APH.parse_envelope_json(padded)
 
     assert {:error, reason} =
@@ -82,6 +83,32 @@ defmodule JidoAph.GuardTest do
 
     assert reason =~ "65536-byte bound"
     assert reason =~ "refused before any parse"
+    refute reason =~ "APH_E"
+  end
+
+  # Why: the ORDER of steps 1 and 2, which the test above cannot prove and
+  # for a while nobody did — moving APH.parse_envelope_json/1 ahead of the
+  # byte bound in gate/3 left the whole suite green, because padded-golden
+  # bytes parse cleanly and a parse-first gate reaches the identical size
+  # refusal one step later. §7.1.7.1 exists precisely so that unbounded,
+  # unauthenticated input never reaches a parser at all, so the ordering is
+  # the property and it needs bytes that are over the bound AND unparseable.
+  # These are both: 70,000 bytes of "x". A parse-first gate answers with the
+  # PARSER's message (asserted here against aph-ex directly); only a gate
+  # that bounds first answers with the byte bound.
+  test "the byte bound runs BEFORE the parse: unparseable oversize input never reaches the parser" do
+    junk = String.duplicate("x", 70_000)
+    assert byte_size(junk) > Guard.max_envelope_bytes()
+
+    # What a parse-first gate would have said instead.
+    assert {:error, parser_message} = APH.parse_envelope_json(junk)
+
+    assert {:error, reason} =
+             Guard.prepare_signal(signal_with(junk), ctx(@principal_signed_config))
+
+    assert reason =~ "65536-byte bound"
+    assert reason =~ "refused before any parse"
+    refute reason == parser_message
     refute reason =~ "APH_E"
   end
 

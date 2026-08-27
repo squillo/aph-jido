@@ -241,14 +241,18 @@ defmodule Demo.RefusalMatrixTest do
   #
   # Why this test exists: spec §7.1.7.1 puts a byte bound on the envelope
   # precisely because canonicalization happens on UNAUTHENTICATED input, so
-  # the bound must be enforced before any parser sees the bytes. This proves
-  # that ordering from the outside rather than by reading the guard: the
-  # variant is the golden padded with trailing whitespace, which the strict
-  # parser still ADMITS (asserted first), so the Gateway's refusal of those
-  # same bytes can only have come from the pre-parse size gate. Like row 4,
-  # the refusal cites no APH_E code — the bound is a bound, not a protocol
-  # rule about the document's contents.
-  test "row 5: an envelope over 64 KiB is refused before any parse" do
+  # the bound must be enforced before any parser sees the bytes. What this
+  # row proves is ATTRIBUTION: the variant is the golden padded with trailing
+  # whitespace, which the strict parser still ADMITS (asserted first), so the
+  # Gateway's refusal of those same bytes can only have come from the size
+  # gate. It does NOT prove the ordering — padded golden bytes parse cleanly,
+  # so a gate that parsed first would reach the identical refusal one step
+  # later. The ordering is pinned in the library, where bytes that are both
+  # over the bound and unparseable separate the two designs
+  # (test/jido_aph/guard_test.exs, "the byte bound runs BEFORE the parse").
+  # Like row 4, the refusal cites no APH_E code — the bound is a bound, not a
+  # protocol rule about the document's contents.
+  test "row 5: an envelope over 64 KiB is refused by the byte bound, not the parser" do
     padded = golden() <> String.duplicate(" ", 70_000)
     assert byte_size(padded) > JidoAph.Guard.max_envelope_bytes()
 
