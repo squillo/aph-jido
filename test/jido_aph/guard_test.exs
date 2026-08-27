@@ -112,6 +112,39 @@ defmodule JidoAph.GuardTest do
     refute reason =~ "APH_E"
   end
 
+  # Why: this input class used to CRASH the gate rather than be refused by
+  # it. The Notarization schema's `:string` is a NimbleOptions binary, so
+  # attach_notarization/3 accepts bytes that are not UTF-8; aph-ex's ops then
+  # RAISE ArgumentError instead of returning {:error, _}, and through a real
+  # agent that surfaced as "Plugin prepare_signal crashed" with no
+  # details.reason and NO refusal log line — failing closed, but outside the
+  # refusal contract the moduledoc promises and with no a2a-extension.md §5
+  # audit record. The class is reachable by any A2A bridge doing exactly what
+  # docs/a2a-carry-mapping.md instructs: attach the exact bytes received,
+  # never a re-serialization. Pins both halves — the {:error, reason} shape
+  # and the log line — plus the absence of an APH code (no protocol rule was
+  # reached) and that the raise is really gone.
+  test "non-UTF-8 envelope refused with a logged reason, not an ArgumentError" do
+    not_text = <<0xFF, 0xFE>> <> golden()
+    refute String.valid?(not_text)
+
+    # aph-ex raises rather than refusing, which is what the gate absorbs.
+    assert_raise ArgumentError, fn -> APH.parse_envelope_json(not_text) end
+
+    {result, log} =
+      with_log(fn ->
+        Guard.prepare_signal(signal_with(not_text), ctx(@principal_signed_config))
+      end)
+
+    assert {:error, reason} = result
+    assert reason =~ "not valid UTF-8 text"
+    assert reason =~ "refused before any parse"
+    refute reason =~ "APH_E"
+
+    assert log =~ "aph_guard: refusing signal"
+    assert log =~ reason
+  end
+
   # Why: §8.3 step 1 — APH parses with unknown fields DENIED, and a shape
   # refusal must carry the parser's message untouched and claim no APH code
   # it did not earn. Pins pass-through by asserting the guard's reason is

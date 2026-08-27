@@ -185,7 +185,10 @@ signal never reaches an Action. The gate order is fixed and every step is
 mandatory:
 
 1. `byte_size(envelope_json) <= 65_536` — **before any parse**, because
-   canonicalization happens on unauthenticated input (§7.1.7.1);
+   canonicalization happens on unauthenticated input (§7.1.7.1) — then a
+   UTF-8 well-formedness check on the now-bounded bytes, since the extension
+   schema's `:string` is a binary type and the `aph-ex` ops raise on anything
+   that is not text;
 2. `APH.parse_envelope_json/1` — strict, unknown fields denied (§8.3 step 1);
 3. `APH.require_attestation_mode/2` when `:require_mode` is configured
    (§8.3.1 step 1a, `APH_E012`);

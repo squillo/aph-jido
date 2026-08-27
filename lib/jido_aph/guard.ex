@@ -13,7 +13,10 @@ defmodule JidoAph.Guard do
 
   1. `byte_size(envelope_json) <= #{@max_envelope_bytes}` — **before any
      parse** (aph spec §7.1.7.1: canonicalization happens on unauthenticated
-     input, so the byte bound is enforced first);
+     input, so the byte bound is enforced first), followed by a UTF-8
+     well-formedness check on the now-bounded bytes, because the extension
+     schema's `:string` is a binary type and the `aph-ex` ops raise on
+     anything that is not text;
   2. `APH.parse_envelope_json/1` — strict, unknown fields denied (§8.3
      step 1);
   3. `APH.require_attestation_mode/2` when `:require_mode` is configured
@@ -203,9 +206,11 @@ defmodule JidoAph.Guard do
       required = Map.get(config, :required, true)
       require_mode = Map.get(config, :require_mode)
 
-      # The extension schema guarantees envelope_json is a string when the
-      # extension is present; any other shape falls through no clause here and
-      # fails closed (the server converts a raise to an ExecutionError).
+      # The extension schema guarantees envelope_json is a BINARY when the
+      # extension is present — not that it is UTF-8 text, which the aph-ex
+      # ops require; gate/3's check_text/1 closes that gap. Any other shape
+      # falls through no clause here and fails closed (the server converts a
+      # raise to an ExecutionError).
       case JidoAph.read_notarization(signal) do
         nil ->
           handle_missing(signal, required)
@@ -327,6 +332,7 @@ defmodule JidoAph.Guard do
 
   defp gate(signal, envelope_json, require_mode) do
     with :ok <- check_size(envelope_json),
+         :ok <- check_text(envelope_json),
          {:ok, _normalized} <- APH.parse_envelope_json(envelope_json),
          :ok <- check_mode(envelope_json, require_mode),
          {:ok, structure_mode} <- APH.verify_proof_structure(envelope_json) do
@@ -345,6 +351,27 @@ defmodule JidoAph.Guard do
     {:error,
      "envelope exceeds the #{@max_envelope_bytes}-byte bound " <>
        "(#{byte_size(envelope_json)} bytes); refused before any parse (spec §7.1.7.1)"}
+  end
+
+  # Step 1's other half — also before any parse, also guard-authored, and
+  # deliberately AFTER the byte bound so an unbounded blob is refused by size
+  # rather than scanned. The extension schema's `:string` is a NimbleOptions
+  # BINARY, not a text type: `attach_notarization/3` accepts bytes that are
+  # not UTF-8, and an A2A bridge attaching the exact bytes it received —
+  # which docs/a2a-carry-mapping.md instructs, precisely so nothing
+  # re-serializes a signed document — can hand this gate some. aph-ex's ops
+  # require UTF-8 and RAISE ArgumentError otherwise, which escapes
+  # prepare_signal as a "Plugin prepare_signal crashed" ExecutionError
+  # carrying no `details.reason` and writing no refusal line: still closed,
+  # but outside the refusal contract and with no a2a-extension.md §5 audit
+  # record. Refused here instead. No APH code and no spec citation — the
+  # specification says nothing about transfer encoding, so neither does this.
+  defp check_text(envelope_json) do
+    if String.valid?(envelope_json) do
+      :ok
+    else
+      {:error, "envelope is not valid UTF-8 text; refused before any parse"}
+    end
   end
 
   # Step 3 — §8.3.1 step 1a, only when a mode policy is configured. The
