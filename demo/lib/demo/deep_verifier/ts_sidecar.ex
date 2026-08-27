@@ -81,10 +81,20 @@ defmodule Demo.DeepVerifier.TsSidecar do
     its `:code` (a §11 code, or `nil` for the two failure kinds that
     deliberately have none: strict-parse and key-unavailable) and its
     message byte-for-byte.
-  - `%{kind: :unavailable}` — node or the built dist is missing. A setup
-    problem, never a verdict about an envelope. See `availability/0`.
+  - `%{kind: :unavailable}` — node or the built dist is missing
+    (`:node_not_found`, `:node_too_old`, `:aph_clone_missing`,
+    `:dist_missing`), or the dist is present but did not load
+    (`:dist_broken`, which only the subprocess can discover: `availability/1`
+    spot-checks four entry files, and a file that exists can still export
+    nothing). A setup problem, never a verdict about an envelope.
   - `%{kind: :sidecar_failure}` — node ran and produced no response
-    document. Also never a verdict.
+    document, or threw something that is not one of the verifier's own error
+    classes. Also never a verdict.
+
+  The separation is load-bearing rather than tidy: a broken build used to
+  come back as `%{kind: :refusal, code: nil}`, which is exactly the shape of
+  a genuine `AphParseError` refusal, so "the verifier never loaded" and "the
+  envelope was refused" were indistinguishable to a caller.
 
   ## Envelope handling
 
@@ -267,21 +277,32 @@ defmodule Demo.DeepVerifier.TsSidecar do
       Absent: #{Enum.map_join(missing, ", ", &Path.relative_to(&1, repo))}
 
       `dist/` is a build artifact and is git-ignored upstream, so a fresh
-      clone never has one. Build it (this writes only untracked artifacts):
+      clone never has one.
 
-          cd #{Path.join([repo, "interpreters", "typescript"])}
-          npm install && npm run build
-
-      `npm install`, not `npm ci`: upstream commits no lockfile, on purpose
-      (its own interpreters/typescript/.gitignore spells out the reason), and
-      `npm ci` refuses to run without one — so it would fail on exactly the
-      fresh clone this message exists to serve.
-
-      The build must include testkit/, which is where the notary's
-      published RFC 8032 §7.1 TEST 3 key material is imported from; the
-      upstream tsconfig.json already includes it.
+      #{build_instructions(repo)}
       """)
     end
+  end
+
+  # The one place the build is spelled, shared by :dist_missing (files absent)
+  # and :dist_broken (files present but unusable) so the two can never drift
+  # into giving different advice.
+  defp build_instructions(repo) do
+    """
+    Build it (this writes only untracked artifacts):
+
+        cd #{Path.join([repo, "interpreters", "typescript"])}
+        npm install && npm run build
+
+    `npm install`, not `npm ci`: upstream commits no lockfile, on purpose
+    (its own interpreters/typescript/.gitignore spells out the reason), and
+    `npm ci` refuses to run without one — so it would fail on exactly the
+    fresh clone this message exists to serve.
+
+    The build must include testkit/, which is where the notary's published
+    RFC 8032 §7.1 TEST 3 key material is imported from; the upstream
+    tsconfig.json already includes it.\
+    """
   end
 
   defp unavailable(reason, message),
@@ -326,7 +347,7 @@ defmodule Demo.DeepVerifier.TsSidecar do
         )
 
       case File.read(response_path) do
-        {:ok, body} -> decode_response(body, now, opts)
+        {:ok, body} -> decode_response(body, now, opts, repo)
         {:error, _} -> sidecar_failure(status, output)
       end
     after
@@ -334,12 +355,17 @@ defmodule Demo.DeepVerifier.TsSidecar do
     end
   end
 
-  defp decode_response(body, now, opts) do
+  # The sidecar labels every failure document with a `kind`, and the three do
+  # not translate into one another. Dispatching on it here is the whole point:
+  # a stale or partial dist/ used to arrive as `{kind: :refusal, code: nil}`,
+  # indistinguishable from a genuine no-code refusal, so a tooling failure
+  # could be read as a verdict about the envelope.
+  defp decode_response(body, now, opts, repo) do
     case JSON.decode(body) do
       {:ok, %{"ok" => true} = response} ->
         {:ok, admitted(response, now, opts)}
 
-      {:ok, %{"ok" => false} = response} ->
+      {:ok, %{"ok" => false, "kind" => "refusal"} = response} ->
         {:error,
          %{
            kind: :refusal,
@@ -347,6 +373,33 @@ defmodule Demo.DeepVerifier.TsSidecar do
            code: response["code"],
            message: response["message"]
          }}
+
+      # The verifier never loaded. Availability cannot catch this on its own:
+      # it spot-checks four entry files, and a file that exists can still
+      # export nothing. Same standing as a missing dist/, so it degrades the
+      # same way — with instructions, never as a verdict.
+      {:ok, %{"ok" => false, "kind" => "loadFailure"} = response} ->
+        unavailable(:dist_broken, """
+        the sibling clone's TypeScript build loaded but is not usable:
+
+            #{response["errorName"]}: #{response["message"]}
+
+        The files availability/1 checks for are present, so this is a stale,
+        partial or corrupt build rather than a missing one.
+
+        #{build_instructions(repo)}
+        """)
+
+      # kind: "unexpected" — something escaped verifyEnvelope that is not one
+      # of the verifier's own error classes.
+      {:ok, %{"ok" => false} = response} ->
+        sidecar_failure(
+          nil,
+          "#{response["errorName"]}: #{response["message"]}",
+          "the node sidecar raised #{response["errorName"]}, which is not one of the " <>
+            "verifier's own error classes; this is a tooling failure, not a verdict " <>
+            "about the envelope"
+        )
 
       {:error, _} ->
         sidecar_failure(nil, body)
@@ -383,14 +436,14 @@ defmodule Demo.DeepVerifier.TsSidecar do
   end
 
   defp sidecar_failure(status, output) do
-    {:error,
-     %{
-       kind: :sidecar_failure,
-       exit_status: status,
-       output: output,
-       message:
-         "the node sidecar produced no response document; this is a tooling failure, " <>
-           "not a verdict about the envelope"
-     }}
+    sidecar_failure(
+      status,
+      output,
+      "the node sidecar produced no response document; this is a tooling failure, " <>
+        "not a verdict about the envelope"
+    )
   end
+
+  defp sidecar_failure(status, output, message),
+    do: {:error, %{kind: :sidecar_failure, exit_status: status, output: output, message: message}}
 end

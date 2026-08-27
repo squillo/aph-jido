@@ -269,6 +269,54 @@ defmodule Demo.DeepVerifierTest do
              "dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb"
   end
 
+  # Why: a broken build must never be reportable as a verdict. The four
+  # dynamic imports in verify.mjs used to sit inside the try whose catch
+  # renders protocol refusals, so a stale or partial dist/ came back as
+  # `%{kind: :refusal, code: nil}` — byte-shape-identical to a genuine
+  # AphParseError or AphKeyUnavailableError refusal, both of which reserve
+  # `code: nil` on purpose. A caller could not tell "the envelope was refused"
+  # from "the verifier never loaded", and `availability/1` cannot close the
+  # gap alone: it spot-checks four entry files, and a file that exists can
+  # still export nothing. This builds exactly that dist — every file present,
+  # `verifyEnvelope` absent — and pins that availability still says :ok while
+  # verify/2 degrades to :unavailable/:dist_broken WITH build instructions.
+  #
+  # :deep-tagged because it spawns node, not because it needs a real build.
+  @tag :deep
+  test "a dist that loads but exports nothing is an environment gap, never a refusal" do
+    repo =
+      Path.join(System.tmp_dir!(), "jido_aph_broken_dist_#{System.unique_integer([:positive])}")
+
+    dist = Path.join([repo, "interpreters", "typescript", "dist"])
+    on_exit(fn -> File.rm_rf(repo) end)
+
+    File.mkdir_p!(Path.join(dist, "src"))
+    File.mkdir_p!(Path.join(dist, "testkit"))
+
+    # Present, importable, and useless: the exact shape availability/1 cannot
+    # see through.
+    File.write!(Path.join([dist, "src", "verify.js"]), "export const nope = 1;\n")
+    File.write!(Path.join([dist, "src", "didkey.js"]), "export const isDidKey = () => false;\n")
+    File.write!(Path.join([dist, "src", "types.js"]), "export const proofsOf = () => [];\n")
+
+    File.write!(
+      Path.join([dist, "testkit", "vectors.js"]),
+      "export const RFC8032_TEST_3 = {};\nexport const ed25519KeyMaterial = () => ({});\n"
+    )
+
+    # Availability is satisfied — which is the whole reason this gap existed.
+    assert TsSidecar.availability(repo) == :ok
+
+    assert {:error, error} = TsSidecar.verify(golden(), now: @pinned_now, aph_repo_path: repo)
+
+    assert error.kind == :unavailable
+    assert error.reason == :dist_broken
+
+    # It degrades the way every other setup gap does: with the build line.
+    assert error.message =~ "npm run build"
+    assert error.message =~ "verifyEnvelope"
+  end
+
   # Why: THE DEPTH-SPLIT BEAT — the single test PRD-001 §8's honesty contract
   # rests on, and the reason "structurally valid" is never written as
   # "verified" anywhere in this repository.

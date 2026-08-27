@@ -25,6 +25,13 @@
  * response and exits 1, a crash writes no response at all, and stdout/stderr
  * stay free for diagnostics the Elixir side captures verbatim.
  *
+ * A failure response carries a `kind`, and the three are never interchangeable:
+ * `refusal` (the verifier reached a verdict about the envelope),
+ * `loadFailure` (the built dist/ could not be loaded or does not export what
+ * this script needs — an environment gap), and `unexpected` (something threw
+ * that is not one of the verifier's own error classes — a tooling failure).
+ * Only the first is ever a statement about the document.
+ *
  * `envelope` is the envelope's JSON TEXT and is passed to `verifyEnvelope`
  * unparsed. An APH envelope's proof carriage is an untagged union decided by
  * the bytes (§7.1.11), and the §7.1.7.1 byte bound is a bound on bytes, so
@@ -59,67 +66,122 @@ const [, , requestPath, responsePath] = process.argv;
 const request = JSON.parse(readFileSync(requestPath, 'utf8'));
 const dist = `${request.aphRepoPath}/interpreters/typescript/dist`;
 
+/**
+ * The verifier's own error classes (`src/errors.ts`). Only these three are
+ * protocol verdicts; anything else that escapes `verifyEnvelope` is this
+ * script's problem or the build's, and must not be reported as a refusal.
+ */
+const APH_ERROR_NAMES = new Set(['AphError', 'AphParseError', 'AphKeyUnavailableError']);
+
 let response;
+let verifyEnvelope;
+let isDidKey;
+let proofsOf;
+let ed25519KeyMaterial;
+let RFC8032_TEST_3;
+
+/**
+ * LOADING IS NOT VERIFYING, and the two must never produce the same document.
+ *
+ * These imports used to sit inside the try below, whose catch renders protocol
+ * refusals — so a partial, stale or corrupt `dist/` came back as
+ * `{kind: :refusal, code: null}`, which is byte-shape-identical to a genuine
+ * no-code refusal (`AphParseError`, `AphKeyUnavailableError`). A caller could
+ * not tell "the envelope was refused" from "the verifier never loaded", and
+ * the Elixir side's availability check cannot close the gap on its own: it
+ * spot-checks four entry files, and a file that exists can still export
+ * nothing. So the load has its own try and its own response kind, and the
+ * exports are checked rather than assumed.
+ */
 try {
-  const { verifyEnvelope } = await import(`${dist}/src/verify.js`);
-  const { isDidKey } = await import(`${dist}/src/didkey.js`);
-  const { proofsOf } = await import(`${dist}/src/types.js`);
-  const { RFC8032_TEST_3, ed25519KeyMaterial } = await import(`${dist}/testkit/vectors.js`);
+  ({ verifyEnvelope } = await import(`${dist}/src/verify.js`));
+  ({ isDidKey } = await import(`${dist}/src/didkey.js`));
+  ({ proofsOf } = await import(`${dist}/src/types.js`));
+  ({ RFC8032_TEST_3, ed25519KeyMaterial } = await import(`${dist}/testkit/vectors.js`));
 
-  const keys = { [NOTARY_VERIFICATION_METHOD]: ed25519KeyMaterial(RFC8032_TEST_3) };
-  const bodyBytes =
-    request.bodyB64 === null || request.bodyB64 === undefined
-      ? undefined
-      : new Uint8Array(Buffer.from(request.bodyB64, 'base64'));
+  for (const [name, value] of [
+    ['verifyEnvelope', verifyEnvelope],
+    ['isDidKey', isDidKey],
+    ['proofsOf', proofsOf],
+    ['ed25519KeyMaterial', ed25519KeyMaterial],
+  ]) {
+    if (typeof value !== 'function') {
+      throw new TypeError(`${dist} loaded but exports no \`${name}\` function`);
+    }
+  }
 
-  const verified = await verifyEnvelope(request.envelope, {
-    now: request.now,
-    requireMode: request.requireMode ?? undefined,
-    keys,
-    bodyBytes,
-  });
-
-  // The key-sourcing story, DERIVED from the envelope that just verified
-  // rather than asserted: every verification method the proofs name is either
-  // self-describing (`did:key`) or was resolved from the supplied map, because
-  // `resolveVerifyingKey` has no third source — an unsupplied non-`did:key`
-  // method throws `AphKeyUnavailableError` and never reaches this line.
-  const methods = proofsOf(verified.envelope).map((proof) => proof.verificationMethod);
-
-  response = {
-    ok: true,
-    // Verbatim `VerifiedEnvelope` field names (src/verify.ts). The parsed
-    // `envelope` member is deliberately NOT forwarded: the caller already
-    // holds the text, and shipping back a re-serialization would hand it a
-    // second, differently-spelled copy of a signed document.
-    verified: {
-      attestationMode: verified.attestationMode,
-      bodyHashChecked: verified.bodyHashChecked,
-      embeddedMandateChecked: verified.embeddedMandateChecked,
-    },
-    keySourcing: {
-      supplied: Object.keys(keys),
-      suppliedOutOfBand: methods.filter((method) => !isDidKey(method)),
-      selfDescribing: methods.filter((method) => isDidKey(method)),
-      fetched: [],
-    },
-    transport: {
-      envelopeBytes: new TextEncoder().encode(request.envelope).length,
-      bodyBytes: bodyBytes === undefined ? null : bodyBytes.length,
-    },
-    verifier: { runtime: process.version, dist },
-  };
+  if (RFC8032_TEST_3 === undefined) {
+    throw new TypeError(`${dist}/testkit/vectors.js loaded but exports no RFC8032_TEST_3`);
+  }
 } catch (error) {
-  // A §11 code when the refusal is a protocol verdict, `null` when it is not:
-  // `AphParseError` and `AphKeyUnavailableError` carry no code on purpose
-  // (src/errors.ts explains both absences), and inventing one here would widen
-  // a set the specification closed.
-  response = {
-    ok: false,
-    errorName: error.name,
-    code: error.code ?? null,
-    message: error.message,
-  };
+  response = { ok: false, kind: 'loadFailure', errorName: error.name, message: error.message };
+}
+
+if (response === undefined) {
+  try {
+    const keys = { [NOTARY_VERIFICATION_METHOD]: ed25519KeyMaterial(RFC8032_TEST_3) };
+    const bodyBytes =
+      request.bodyB64 === null || request.bodyB64 === undefined
+        ? undefined
+        : new Uint8Array(Buffer.from(request.bodyB64, 'base64'));
+
+    const verified = await verifyEnvelope(request.envelope, {
+      now: request.now,
+      requireMode: request.requireMode ?? undefined,
+      keys,
+      bodyBytes,
+    });
+
+    // The key-sourcing story, DERIVED from the envelope that just verified
+    // rather than asserted: every verification method the proofs name is either
+    // self-describing (`did:key`) or was resolved from the supplied map, because
+    // `resolveVerifyingKey` has no third source — an unsupplied non-`did:key`
+    // method throws `AphKeyUnavailableError` and never reaches this line.
+    const methods = proofsOf(verified.envelope).map((proof) => proof.verificationMethod);
+
+    response = {
+      ok: true,
+      // Verbatim `VerifiedEnvelope` field names (src/verify.ts). The parsed
+      // `envelope` member is deliberately NOT forwarded: the caller already
+      // holds the text, and shipping back a re-serialization would hand it a
+      // second, differently-spelled copy of a signed document.
+      verified: {
+        attestationMode: verified.attestationMode,
+        bodyHashChecked: verified.bodyHashChecked,
+        embeddedMandateChecked: verified.embeddedMandateChecked,
+      },
+      keySourcing: {
+        supplied: Object.keys(keys),
+        suppliedOutOfBand: methods.filter((method) => !isDidKey(method)),
+        selfDescribing: methods.filter((method) => isDidKey(method)),
+        fetched: [],
+      },
+      transport: {
+        envelopeBytes: new TextEncoder().encode(request.envelope).length,
+        bodyBytes: bodyBytes === undefined ? null : bodyBytes.length,
+      },
+      verifier: { runtime: process.version, dist },
+    };
+  } catch (error) {
+    // Only the verifier's OWN error classes are verdicts about the envelope.
+    // Anything else that escapes verifyEnvelope — a TypeError from a stale
+    // dist, a RangeError, whatever — is a tooling failure wearing a refusal's
+    // clothes, and gets its own kind so nobody has to guess.
+    //
+    // For a real verdict: a §11 code when there is one, `null` when there is
+    // not. `AphParseError` and `AphKeyUnavailableError` carry no code on
+    // purpose (src/errors.ts explains both absences), and inventing one here
+    // would widen a set the specification closed.
+    response = APH_ERROR_NAMES.has(error.name)
+      ? {
+          ok: false,
+          kind: 'refusal',
+          errorName: error.name,
+          code: error.code ?? null,
+          message: error.message,
+        }
+      : { ok: false, kind: 'unexpected', errorName: error.name, message: error.message };
+  }
 }
 
 writeFileSync(responsePath, JSON.stringify(response));
