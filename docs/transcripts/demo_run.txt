@@ -1,0 +1,426 @@
+==============================================================================
+jido_aph — mix demo.run
+
+An APH-notarized signal crossing two jido agents, and a gate that refuses to
+act without one. Read the honesty footer at the bottom before quoting
+anything from the middle.
+==============================================================================
+
+
+[1] PROVENANCE — the exact bytes every claim below rests on
+------------------------------------------------------------------------------
+Nothing here is vendored. The fixtures are read at runtime from a sibling
+clone of the aph repo (PRD-001 D7), so the SHA below is what attributes
+every claim in this transcript to bytes a reader can fetch for themselves.
+
+  corpus source         sibling aph clone, resolved at runtime from
+                        config :jido_aph, aph_repo_path: "../../aph"
+  aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
+  aph worktree          clean at HEAD
+  aph examples/         clean
+
+  That SHA is READ from the clone, not asserted against a pin. Pinning it,
+  and failing the build on fixture drift, is CI's job (PRD-001 T15); the
+  demo's job is to say which bytes it actually ran on.
+
+  golden envelope       examples/principal_signed_envelope.json
+    bytes               3382
+    id                  urn:uuid:00000000-0000-4000-8000-0000000000f3
+    aphVersion          0.1
+    channel.kind        slack  (closed vocabulary, §7.1.5)
+    contentClass        Reply  (closed vocabulary, §7.1.6)
+    attestationMode     PrincipalSigned  (§7.1.7)
+    proof               2-element chain
+    validFrom           2026-05-21T00:00:00Z
+    validUntil          2026-05-22T00:00:00Z
+
+  authorized body       examples/principal_signed_body.txt
+    bytes on disk       427
+    envelope claims     bodySize 427
+    envelope claims     bodySha256
+      dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb
+
+  Read those last two lines exactly as written: they are the ENVELOPE's own
+  words, quoted. bodySize is compared against the bytes on disk and agrees.
+  bodySha256 is NOT recomputed — not here, and not in any leg below. No
+  cryptography runs on the BEAM in this demo, and PRD-001 §5 counts hashing
+  as cryptography.
+
+  mode-absent fixture   examples/slack_reply_envelope.json
+    bytes               2148
+    policy              carries NO attestationMode key
+
+  An absent attestationMode normatively means NotaryAttested (§7.1.7), so a
+  PrincipalSigned policy must refuse it rather than quietly accept whatever
+  the envelope happens to offer. Leg [6] is that refusal; leg [5] forges a
+  PrincipalSigned label onto this same fixture.
+
+
+[2] THE GATE — what JidoAph.Guard runs, in this order, before routing
+------------------------------------------------------------------------------
+S1  §7.1.7.1        envelope byte bound (65536 B),
+                    enforced BEFORE any parse
+S2  §8.3 step 1     APH.parse_envelope_json/1 — strict parse, with
+                    unknown fields denied
+S3  §8.3.1 step 1a  APH.require_attestation_mode/2 — only when a mode
+                    policy is configured (APH_E012)
+S4  §7.1.11         APH.verify_proof_structure/1 — ALWAYS, even with
+                    no mode policy, because S3 alone admits a forged
+                    label (APH_E013)
+
+And the six things no leg below runs, at any depth, ever:
+
+N1  Ed25519 signatures over JCS/RFC 8785 (§8.3)
+N2  key discovery — DNS TXT / did:web (§8.4)
+N3  validity window (60s skew)
+N4  revocation / credentialStatus
+N5  bodySha256 over the received bytes (§8.3 step 8, APH_E009)
+N6  closed channel / contentClass vocabulary (§7.1.5 / §7.1.6)
+
+Each leg names, from what actually happened, which of S1-S4 RAN, which one
+REFUSED, and which were NEVER REACHED. N1-N6 are constant: they are what
+this whole rail does not do.
+
+Lines marked `log [level]` are verbatim Logger output from JidoAph.Guard
+and Demo.Actions.DeliverReply, routed into this narrative so they appear
+inside the leg that produced them. jido's AgentServer emits its own [error]
+line for a refused prepare_signal hook after it has already replied to the
+caller; that line is real, and it is not reproduced here.
+
+
+[3] LEG 1 — HAPPY PATH: the golden envelope crosses two agents
+------------------------------------------------------------------------------
+Scribe reads examples/principal_signed_envelope.json — 3382 bytes of
+verbatim JSON text — and examples/principal_signed_body.txt, the 427
+authorized body bytes. It attaches both to a "slack.reply.requested" signal
+with JidoAph.attach_notarization/3 — envelope as text, body as base64 — and
+hands the signal to Gateway with Jido.AgentServer.call/2.
+
+Gateway mounts JidoAph.Guard as required: true, require_mode:
+"PrincipalSigned", signal_patterns: ["slack.reply.requested"].
+
+The envelope is a PRE-MINTED committed golden. Presenting it asserts nothing
+about this run: nothing here was minted, and no human authorized anything.
+
+  log [info] aph_guard: notarization-shaped, mode policy satisfied
+                (PrincipalSigned) — admitting signal "slack.reply.requested"
+  log [info] deliver_reply: would deliver (no channel adapter)
+
+  outcome               ADMITTED — call/2 returned {:ok, %Jido.Agent{}}
+  routed action         Demo.Actions.DeliverReply RAN
+  context.aph, as the routed action received it:
+      verdict
+          "notarization-shaped, mode policy satisfied (PrincipalSigned)"
+      structure_mode  "PrincipalSigned"
+      require_mode    "PrincipalSigned"
+      depth           :structural
+
+  `structure_mode` is the mode the proof STRUCTURE supports; `require_mode`
+  is the policy that was configured. They agree here, and the guard reports
+  them separately on purpose — a verdict that conflated them would be
+  claiming the envelope PROVED the policy rather than merely matching it.
+  `depth: :structural` states what this gate RAN, never what a config
+  declared.
+
+  cross-check           APH.verify_proof_structure/1 on the same bytes
+                        returns this identical result, byte for byte:
+                        the guard passed it through untouched, and the
+                        framework's error wrapping did not alter it
+
+  gate steps, this leg:
+      S1  §7.1.7.1        RAN
+      S2  §8.3 step 1     RAN
+      S3  §8.3.1 step 1a  RAN
+      S4  §7.1.11         RAN
+  never run, this or any leg:
+      N1 signatures     N2 key discovery   N3 validity window
+      N4 revocation     N5 bodySha256      N6 closed vocabulary
+
+
+[4] LEG 2 — REFUSAL 1/6: no notarization extension, required: true
+------------------------------------------------------------------------------
+A "slack.reply.requested" signal with no notarization extension at all —
+the ordinary case of an agent that simply does not speak APH.
+
+This is the a2a-extension.md §5 step 5 mirror: where the extension is absent
+and the recipient's deployment policy REQUIRES APH, "the endpoint REJECTS
+messages from the agent and SHOULD log the rejection for audit" — both
+halves, the rejection and the log line, are visible in this block.
+
+  log [warning] aph_guard: refusing signal "slack.reply.requested":
+                notarization extension missing: signal "slack.reply.requested"
+                carries no APH envelope and this guard requires one (required:
+                true, a2a-extension.md §5)
+
+  outcome               REFUSED before routing
+  routed action         Demo.Actions.DeliverReply did NOT run
+  reason, verbatim, as Jido.AgentServer.call/2 handed it back:
+      notarization extension missing: signal "slack.reply.requested" carries
+      no APH envelope and this guard requires one (required: true,
+      a2a-extension.md §5)
+
+  No envelope existed, so no gate step ran and no APH_E code is claimed:
+  the taxonomy codes belong to protocol rules, and a document that was
+  never presented reached none of them.
+
+  gate steps, this leg:
+      S1  §7.1.7.1        NOT REACHED
+      S2  §8.3 step 1     NOT REACHED
+      S3  §8.3.1 step 1a  NOT REACHED
+      S4  §7.1.11         NOT REACHED
+  never run, this or any leg:
+      N1 signatures     N2 key discovery   N3 validity window
+      N4 revocation     N5 bodySha256      N6 closed vocabulary
+
+
+[5] LEG 3 — REFUSAL 2/6: a forged PrincipalSigned label (APH_E013)
+------------------------------------------------------------------------------
+Derived in memory, on this run: examples/slack_reply_envelope.json with a
+"PrincipalSigned" attestationMode written over its policy. Its proof is a
+single object, which cannot carry that label — §7.1.11 requires the label
+and the structure to agree in BOTH directions.
+
+This is the forgery a mode gate ALONE waves through: on these exact bytes
+APH.require_attestation_mode/2 answers :ok, because the label does say what
+the policy asked for. Only S4 catches the lie, which is why the guard runs
+S4 unconditionally.
+
+Nothing derived here is ever written to disk; the committed fixtures are
+never edited (PRD-001 §10 gate 4).
+
+  log [warning] aph_guard: refusing signal "slack.reply.requested": APH_E013:
+                proof chain invalid: `attestationMode` is `PrincipalSigned`
+                but `proof` is a single object; the label MUST accompany a
+                two-element chain (§7.1.11)
+
+  outcome               REFUSED before routing
+  routed action         Demo.Actions.DeliverReply did NOT run
+  reason, verbatim, as Jido.AgentServer.call/2 handed it back:
+      APH_E013: proof chain invalid: `attestationMode` is `PrincipalSigned`
+      but `proof` is a single object; the label MUST accompany a two-element
+      chain (§7.1.11)
+
+  S3 on these bytes     :ok   <- admitted the forgery
+  S4 on these bytes     refused, above
+
+  cross-check           APH.verify_proof_structure/1 on the same bytes
+                        returns this identical result, byte for byte:
+                        the guard passed it through untouched, and the
+                        framework's error wrapping did not alter it
+
+  gate steps, this leg:
+      S1  §7.1.7.1        RAN
+      S2  §8.3 step 1     RAN
+      S3  §8.3.1 step 1a  RAN
+      S4  §7.1.11         REFUSED  <- the leg stops here
+  never run, this or any leg:
+      N1 signatures     N2 key discovery   N3 validity window
+      N4 revocation     N5 bodySha256      N6 closed vocabulary
+
+
+[6] LEG 4 — REFUSAL 3/6: mode-absent vs a PrincipalSigned policy (APH_E012)
+------------------------------------------------------------------------------
+examples/slack_reply_envelope.json, untampered. Its policy carries no
+attestationMode key at all, and an absent mode normatively means
+NotaryAttested (§7.1.7) — weaker than the configured PrincipalSigned
+policy, so §8.3.1 step 1a refuses it up front instead of silently
+downgrading to whatever the envelope offers.
+
+Its structure is sound, so the refusal is the mode policy and nothing else.
+
+  log [warning] aph_guard: refusing signal "slack.reply.requested": APH_E012:
+                attestation mode refused: required `PrincipalSigned`, envelope
+                is `NotaryAttested`
+
+  outcome               REFUSED before routing
+  routed action         Demo.Actions.DeliverReply did NOT run
+  reason, verbatim, as Jido.AgentServer.call/2 handed it back:
+      APH_E012: attestation mode refused: required `PrincipalSigned`, envelope
+      is `NotaryAttested`
+
+  S4 on these bytes     {:ok, "NotaryAttested"}   <- the structure is sound
+  policy.decision       "AskEveryTime"
+
+  That decision field records the human's STANDING CONFIGURATION — the
+  policy mode they chose for this channel — and is never the verdict on this
+  act. §7.1.7 is explicit that it "Records the human's standing
+  configuration, NOT the verdict on this act", the verdict being carried by
+  the state the envelope was issued from, so an AskEveryTime envelope
+  truthfully carries AskEveryTime after the human said yes.
+  "Implementations that read this field as a per-act decision have shipped
+  real defects; do not." Nothing in this repo reads it as one: the guard
+  never looks at decision, and this refusal is about attestationMode alone.
+
+  cross-check           APH.require_attestation_mode/2 on the same bytes
+                        returns this identical result, byte for byte:
+                        the guard passed it through untouched, and the
+                        framework's error wrapping did not alter it
+
+  gate steps, this leg:
+      S1  §7.1.7.1        RAN
+      S2  §8.3 step 1     RAN
+      S3  §8.3.1 step 1a  REFUSED  <- the leg stops here
+      S4  §7.1.11         NOT REACHED
+  never run, this or any leg:
+      N1 signatures     N2 key discovery   N3 validity window
+      N4 revocation     N5 bodySha256      N6 closed vocabulary
+
+
+[7] LEG 5 — REFUSAL 4/6: an unknown envelope field (strict parse, no code)
+------------------------------------------------------------------------------
+Derived in memory, on this run: the golden with one extra top-level field,
+"jidoAphUnknownField". §8.3 step 1 parses STRICTLY, with unknown fields
+denied, so a key the protocol never defined is a hard refusal rather than a
+silently dropped one.
+
+The refusal carries the parser's own message and no APH_E code — a document
+that never parsed reached no protocol rule and may cite none.
+
+  log [warning] aph_guard: refusing signal "slack.reply.requested": unknown
+                field `jidoAphUnknownField`, expected one of `aphVersion`,
+                `@context`, `type`, `id`, `issuer`, `validFrom`, `validUntil`,
+                `credentialSubject`, `linkedMandate`, `credentialStatus`,
+                `proof` at line 1 column 1770
+
+  outcome               REFUSED before routing
+  routed action         Demo.Actions.DeliverReply did NOT run
+  reason, verbatim, as Jido.AgentServer.call/2 handed it back:
+      unknown field `jidoAphUnknownField`, expected one of `aphVersion`,
+      `@context`, `type`, `id`, `issuer`, `validFrom`, `validUntil`,
+      `credentialSubject`, `linkedMandate`, `credentialStatus`, `proof` at
+      line 1 column 1770
+
+  cross-check           APH.parse_envelope_json/1 on the same bytes
+                        returns this identical result, byte for byte:
+                        the guard passed it through untouched, and the
+                        framework's error wrapping did not alter it
+
+  gate steps, this leg:
+      S1  §7.1.7.1        RAN
+      S2  §8.3 step 1     REFUSED  <- the leg stops here
+      S3  §8.3.1 step 1a  NOT REACHED
+      S4  §7.1.11         NOT REACHED
+  never run, this or any leg:
+      N1 signatures     N2 key discovery   N3 validity window
+      N4 revocation     N5 bodySha256      N6 closed vocabulary
+
+
+[8] LEG 6 — REFUSAL 5/6: over the byte bound, refused before any parse
+------------------------------------------------------------------------------
+Derived in memory, on this run: the golden followed by 70,000 spaces —
+73382 bytes against the 65536-byte bound of §7.1.7.1.
+
+The bound exists because canonicalization happens on UNAUTHENTICATED input,
+so it has to be enforced before a parser ever sees the bytes. That ordering
+is provable from outside the guard: trailing whitespace is legal JSON, so
+the strict parser ADMITS these very bytes.
+
+  log [warning] aph_guard: refusing signal "slack.reply.requested": envelope
+                exceeds the 65536-byte bound (73382 bytes); refused before any
+                parse (spec §7.1.7.1)
+
+  outcome               REFUSED before routing
+  routed action         Demo.Actions.DeliverReply did NOT run
+  reason, verbatim, as Jido.AgentServer.call/2 handed it back:
+      envelope exceeds the 65536-byte bound (73382 bytes); refused before any
+      parse (spec §7.1.7.1)
+
+  S2 on these bytes     {:ok, <canonical JSON text>}
+                        ^ the parser would take them, so the refusal
+                          above can only be the byte bound
+
+  gate steps, this leg:
+      S1  §7.1.7.1        REFUSED  <- the leg stops here
+      S2  §8.3 step 1     NOT REACHED
+      S3  §8.3.1 step 1a  NOT REACHED
+      S4  §7.1.11         NOT REACHED
+  never run, this or any leg:
+      N1 signatures     N2 key discovery   N3 validity window
+      N4 revocation     N5 bodySha256      N6 closed vocabulary
+
+
+[9] LEG 7 — ROW 6/6: a bare signal under required: false, delivered tagged
+------------------------------------------------------------------------------
+The same bare signal as leg [4], sent to a gateway identical to Gateway in
+every respect but one: required: false.
+
+This is the other half of the a2a-extension.md §5 mirror — step 6, the
+permissive deployment that "MAY display a 'Not notarized' UI indicator and
+proceed to deliver the message under the recipient's existing trust rules".
+Delivery happens; it happens FLAGGED.
+
+  log [warning] aph_guard: signal "slack.reply.requested" carries no
+                notarization envelope; passing through tagged unverified
+                (required: false)
+  log [info] deliver_reply: would deliver (no channel adapter)
+
+  outcome               PASSED THROUGH, TAGGED — nothing was examined
+  routed action         Demo.Actions.DeliverReply RAN
+  context.aph           %{notarization: :absent, tag: :unverified}
+
+  Note what is not there: no verdict, no "notarization-shaped", no mode.
+  Nothing was examined, so nothing is claimed. The tag rides the RUNTIME
+  CONTEXT the receiving guard authored, never the signal — a wire-borne
+  tag would be sender-suppliable, and is silently stripped on any VM
+  where the extension namespace is unregistered.
+
+  gate steps, this leg:
+      S1  §7.1.7.1        NOT REACHED
+      S2  §8.3 step 1     NOT REACHED
+      S3  §8.3.1 step 1a  NOT REACHED
+      S4  §7.1.11         NOT REACHED
+  never run, this or any leg:
+      N1 signatures     N2 key discovery   N3 validity window
+      N4 revocation     N5 bodySha256      N6 closed vocabulary
+
+
+[10] HONESTY FOOTER — what this run did not establish
+------------------------------------------------------------------------------
+Seven signals were gated. One was admitted, five were refused, one was
+passed through and tagged. The admission means exactly three things: the
+envelope PARSED strictly, its declared attestation mode satisfied the
+configured policy without downgrade, and its proof STRUCTURE matched that
+label in both directions.
+
+Here is what it does not mean — about any envelope above, the admitted one
+included:
+
+  N1  No Ed25519 signature was checked. Not the principal's, not the
+      notary's, not the two on the embedded delegation mandate. Zero
+      cryptography ran on the BEAM (§8.3).
+  N2  No key was discovered or resolved: no DNS TXT lookup, no did:web
+      fetch, no did:key decode. Nothing on this rail resolves anything
+      (§8.4).
+  N3  The validity window was never compared against any clock. The golden
+      declares 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z and no leg
+      above read it.
+  N4  Revocation was never consulted. The golden carries no
+      credentialStatus, and no status transport exists in this repo.
+  N5  bodySha256 was never recomputed over the 427 received bytes. The
+      digest quoted in the banner
+      (dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb)
+      is the envelope's own claim (§8.3 step 8, APH_E009).
+  N6  The closed channel and contentClass vocabularies were never enforced.
+      aph-ex exposes no such op (§7.1.5 / §7.1.6).
+
+  The live notary at did:web:aph-notary.squillo.com was not contacted, by
+  anything, at any point. Nothing above reached the network at all.
+
+aph-ex says it plainly of the one structural op this gate leans on hardest
+(../aph/interpreters/elixir/lib/aph.ex, verify_proof_structure/1):
+
+    "A successful return says the structure is sound. It says NOTHING
+     about whether any signature verifies — a caller that reports "the
+     human signed this" on the strength of this function alone is
+     reporting a claim no key has backed."
+
+That is the whole reason the verdict reads "notarization-shaped, mode
+policy satisfied" and never a word stronger, and the reason the guard's own
+log lines above are checked by test for those two bare words.
+
+Cryptographic depth is a different leg, in a second and independent
+implementation, and it is not this one:
+
+    mix demo.deep_verify        (optional, Node >= 20)
+
+==============================================================================
