@@ -5,12 +5,12 @@ An [APH](https://github.com/squillo/aph) notarization gate for
 let an agent act on a signal that carries no notarization envelope, plus a
 demo that is scrupulous about what that refusal actually proves.
 
-> **DRAFT — published for review, not for production use.** Every suite here is
-> green **on the machine that built it** — and at publication GitHub Actions had
-> never run, so the CI badge is the only gate not yet observed by anything but a
-> local replay. Nothing here has been reviewed outside the project, no release
-> is tagged, nothing is published to Hex, and the API may change without notice.
-> Read [Status](#status) before depending on any of it.
+> **DRAFT — published for review, not for production use.** Every suite is
+> green, on this machine and on CI. What "draft" means here is everything else:
+> nothing has been reviewed outside the project, no release is tagged, nothing
+> is published to Hex, three of four governance questions are still unanswered,
+> and the API may change without notice. Read [Status](#status) before depending
+> on any of it.
 
 > **Community integration, not an agentjido package.** The repository is named
 > `aph-jido` because this is APH's integration with jido; the Elixir package
@@ -1420,16 +1420,24 @@ been reviewed by anyone outside the project, and the library API may change
 without notice. It is published to be read and argued with, not to be depended
 on.
 
-`.github/workflows/ci.yml` is committed and carries both jobs — `core gate (no
-Node)` and `deep leg (optional, Node >= 20)`. **At the moment of publication,
-GitHub Actions had never executed it.** The repository had no remote until
-then, so every gate described above was verified by local replay of the
-workflow's own steps — a gate that exists and was exercised by hand, not a gate
-observed green on Actions. The first Actions run is the one triggered by the
-publishing push; read its result rather than this sentence. Require the `core`
-check and nothing else: `deep` declares no `needs:` and nothing declares
-`needs: deep`, so it can be red, skipped, or deleted without touching the
-Node-free pipeline.
+`.github/workflows/ci.yml` carries both jobs — `core gate (no Node)` and `deep
+leg (optional, Node >= 20)` — and **both passed on the first run Actions ever
+executed for this repository**:
+[run 33124473228](https://github.com/squillo/aph-jido/actions/runs/33124473228),
+commit `881c79d`, 2026-08-27.
+
+That sentence is worth stating precisely, because it was false until the moment
+it wasn't. Until the publishing push there was no remote, so every gate
+described above rested on a local replay of the workflow's own steps — real
+evidence, but not the thing the workflow claims. The run above is the thing
+itself: the sibling `aph` checkout resolved at the pinned SHA, the fixture
+digests matched, `mix demo.run` was executed on a machine with no Node and its
+transcript grepped, and the optional deep job built the sibling's TypeScript
+implementation and ran the `:deep` suite against it.
+
+Require the `core` check and nothing else: `deep` declares no `needs:` and
+nothing declares `needs: deep`, so it can be red, skipped, or deleted without
+touching the Node-free pipeline.
 
 **Licensed Apache-2.0** (`LICENSE`), matching
 [squillo/aph](https://github.com/squillo/aph). The guard and the extension are
