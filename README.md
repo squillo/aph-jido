@@ -140,12 +140,21 @@ key `config :jido_aph, aph_repo_path:` (`"../aph"` at the library root,
 
 ### The optional deep leg
 
+Starting from `demo/`, where the previous block left you:
+
 ```sh
-cd ../aph/interpreters/typescript && npm install && npm run build   # builds dist/
-cd -                                                            # back to demo/
-mix test --include deep      # or: APH_DEEP=1 mix test
+cd ../../aph/interpreters/typescript && npm install && npm run build  # builds dist/
+cd -                       # back to demo/ — both commands below need it
+mix test --include deep    # or: APH_DEEP=1 mix test
 mix demo.deep_verify
 ```
+
+The `cd -` matters. Both mix commands live in the demo app: run them at the
+repository root instead and `mix demo.deep_verify` reports that the task does
+not exist, while `mix test --include deep` prints **`77 passed`** — the
+library suite, which contains no `:deep`-tagged tests at all. A pass for work
+that never ran is the one outcome this repository is built to refuse, so read
+that number as the wrong-directory signal it is.
 
 `npm install`, not `npm ci`: the sibling commits no lockfile and says why in
 its own `interpreters/typescript/.gitignore` — "a lockfile would be a
