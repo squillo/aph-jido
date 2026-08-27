@@ -9,9 +9,9 @@ defmodule Demo.DeepVerifier.TsSidecar do
   and that absence is load-bearing: `aph-ex`'s four-op surface is
   parity-locked, zero cryptography runs in Elixir, and a deep verifier is
   therefore always someone else's implementation of the spec. This module
-  is the demo's choice of that someone — `interpreters/typescript` at the
-  SHA-pinned sibling clone, run under `node` through
-  `priv/node/verify.mjs`.
+  is the demo's choice of that someone — `interpreters/typescript` in the
+  sibling clone resolved at runtime (CI pins its SHA; this module does not),
+  run under `node` through `priv/node/verify.mjs`.
 
   ## What the deep leg ADDS over `JidoAph.Guard`
 
