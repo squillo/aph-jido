@@ -141,11 +141,18 @@ key `config :jido_aph, aph_repo_path:` (`"../aph"` at the library root,
 ### The optional deep leg
 
 ```sh
-cd ../aph/interpreters/typescript && npm ci && npm run build   # builds dist/
+cd ../aph/interpreters/typescript && npm install && npm run build   # builds dist/
 cd -                                                            # back to demo/
 mix test --include deep      # or: APH_DEEP=1 mix test
 mix demo.deep_verify
 ```
+
+`npm install`, not `npm ci`: the sibling commits no lockfile and says why in
+its own `interpreters/typescript/.gitignore` — "a lockfile would be a
+durable-looking record of a dependency graph this package's whole claim is
+that it does not have. CI installs with `npm install`." `npm ci` refuses to
+run without one, so it fails on every fresh clone. The build writes only
+untracked artifacts into the sibling; nothing else here ever writes to it.
 
 `mix demo.deep_verify` degrades on purpose: with Node or the built `dist/`
 missing it prints `DEEP LEG UNAVAILABLE — nothing was verified, and nothing is

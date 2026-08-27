@@ -270,7 +270,12 @@ defmodule Demo.DeepVerifier.TsSidecar do
       clone never has one. Build it (this writes only untracked artifacts):
 
           cd #{Path.join([repo, "interpreters", "typescript"])}
-          npm ci && npm run build
+          npm install && npm run build
+
+      `npm install`, not `npm ci`: upstream commits no lockfile, on purpose
+      (its own interpreters/typescript/.gitignore spells out the reason), and
+      `npm ci` refuses to run without one — so it would fail on exactly the
+      fresh clone this message exists to serve.
 
       The build must include testkit/, which is where the notary's
       published RFC 8032 §7.1 TEST 3 key material is imported from; the

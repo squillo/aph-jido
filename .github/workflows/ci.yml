@@ -557,15 +557,12 @@ jobs:
       # aph clone, so the failure under test is the one being tested rather
       # than an accident of the machine.
       #
-      # KNOWN DEFECT, recorded here rather than patched from this card: the
-      # setup story this path prints says `npm ci && npm run build`, and `npm
-      # ci` cannot work against the sibling — upstream commits no lockfile, on
-      # purpose, and `npm ci` refuses to run without one. The build steps above
-      # therefore use `npm install`, matching the sibling's own TypeScript
-      # workflow. The message lives in demo/lib/demo/deep_verifier/
-      # ts_sidecar.ex (T12) with its wording pinned by T13's test, so the fix
-      # is a card of its own; the assertion below deliberately does not pin the
-      # wrong half.
+      # The setup story this path prints used to say `npm ci`, which cannot
+      # work against the sibling — no lockfile, on purpose; see the install
+      # step above. That is now fixed at the source (demo/lib/demo/
+      # deep_verifier/ts_sidecar.ex), so the instructions a reader is handed
+      # and the commands this job runs finally agree. The needles below still
+      # pin only the stable half of the message, never the install command.
       - name: The unavailable path still refuses, loudly
         working-directory: jido_aph/demo
         run: |
