@@ -5,10 +5,12 @@ An [APH](https://github.com/squillo/aph) notarization gate for
 let an agent act on a signal that carries no notarization envelope, plus a
 demo that is scrupulous about what that refusal actually proves.
 
-> **DRAFT — published for review, not for production use.** Every gate here is
-> real and every suite is green, but nothing in this repository has been
-> reviewed by anyone outside the project, no release is tagged, and the API may
-> change without notice. Read [Status](#status) before depending on any of it.
+> **DRAFT — published for review, not for production use.** Every suite here is
+> green **on the machine that built it** — and at publication GitHub Actions had
+> never run, so the CI badge is the only gate not yet observed by anything but a
+> local replay. Nothing here has been reviewed outside the project, no release
+> is tagged, nothing is published to Hex, and the API may change without notice.
+> Read [Status](#status) before depending on any of it.
 
 > **Community integration, not an agentjido package.** The repository is named
 > `aph-jido` because this is APH's integration with jido; the Elixir package
@@ -104,11 +106,23 @@ Two sibling clones. The dependency is a path dep — aph-ex is not on hex.pm.
 
 ```sh
 git clone https://github.com/squillo/aph.git
-git clone <this repo> jido_aph      # sibling of aph, not inside it
+git -C aph checkout f01e3470f86533c4099db8ab0ab6b155bd0ea4aa   # the pin, see below
+git clone https://github.com/squillo/aph-jido.git jido_aph     # sibling of aph, not inside it
 cd jido_aph
 mix deps.get
 mix test
 ```
+
+Two things about those first two lines. The directory must be named `aph` and
+must sit beside this one, because `:aph_repo_path` defaults to `"../aph"`. And
+the checkout is **pinned on purpose**: CI pins the same SHA and fails on
+fixture drift, so a reader on `main` can hit a golden this repository's
+recorded digests do not describe while CI stays green. Skip the pin and you
+are testing against different bytes than the ones every claim here cites.
+
+The clone directory is `jido_aph` while the repository is `aph-jido`: the
+Elixir application is `:jido_aph`, and keeping the checkout matching the app
+is the smaller surprise. Any directory name works; only `aph`'s does not.
 
 A Rust toolchain is **mandatory**, not optional: the aph-ex binding is a
 rustler NIF that compiles from source, and no prebuilt `.so` ships. The first
@@ -161,7 +175,7 @@ mix demo.deep_verify
 
 The `cd -` matters. Both mix commands live in the demo app: run them at the
 repository root instead and `mix demo.deep_verify` reports that the task does
-not exist, while `mix test --include deep` prints **`77 passed`** — the
+not exist, while `mix test --include deep` prints **`79 passed`** — the
 library suite, which contains no `:deep`-tagged tests at all. A pass for work
 that never ran is the one outcome this repository is built to refuse, so read
 that number as the wrong-directory signal it is.

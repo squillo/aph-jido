@@ -6,10 +6,16 @@
 - **aph state cited throughout:** commit `f01e3470f86533c4099db8ab0ab6b155bd0ea4aa`
 - **Delivery channel:** this session's report to the repo owner, who is the aph
   maintainer. There is no separate email or issue; the report IS the delivery.
-- **Acknowledgment:** tracked by card T17. **Publish of jido_aph is blocked
-  until acknowledgment is recorded there.** This document records that the
-  notification went out, its date, and its question list; it does not record
-  the answers.
+- **Acknowledgment:** **RECEIVED 2026-08-27 — see [§5. Outcome](#5-outcome).**
+  Publication was authorized in draft status and question (d) was answered;
+  (a), (b) and (c) were not.
+
+> **Editor's note, 2026-08-27.** Sections 1–4 below are preserved as the
+> notification was sent, in the present tense it was written in — including its
+> statements that nothing had shipped and that the repository was private.
+> Those were true when sent and are now superseded. §5 records what came back.
+> This document is amended by appending, never by rewriting, because a
+> governance record that edits its own history is not a record.
 
 ## 1. The notification
 
@@ -134,5 +140,35 @@ us; the fix is a documentation edit on your side, at your discretion.
   goldens vs. vendored copies; **(d)** `jido_aph` name sign-off.
 - Erratum reported: `examples/README.md` body-binding summary (three stale
   claims quoted above).
-- Acknowledgment: **not yet received** — tracked by T17, which gates publish.
-  This repository remains private until T17 records the acknowledgment.
+- Acknowledgment: **received 2026-08-27** — recorded in §5 below. (This line
+  read "not yet received" when the notification was sent; §5 is the amendment.)
+
+## 5. Outcome
+
+Recorded 2026-08-27, the same day the notification was sent. The aph
+maintainer, who also owns this repository, responded by authorizing
+publication and answering one of the four questions.
+
+- **Publication: AUTHORIZED**, public and in draft status, as
+  `squillo/aph-jido`. This publication is what expires the pre-production
+  exception for this artifact — that expiry is disclosed, not avoided, and
+  disclosing it is why this notification exists.
+- **(d) Name: ANSWERED — `aph-jido`.** The proposal was `jido_aph`; the ruling
+  moved `aph` to the front, which addresses the "could be mistaken for an
+  agentjido package" concern more directly than a `jido_` prefix. The Elixir
+  application keeps `:jido_aph` and its modules keep `JidoAph.*`, so repository
+  name and package name deliberately differ.
+- **(a) BEAM-side `:crypto.hash` for §8.3 step 8: NOT ANSWERED.** Recorded as
+  open. The design avoids the question in practice — no cryptography, hashing
+  included, runs on the BEAM here — so nothing shipped depends on the answer.
+- **(b) In-org shipping vs. outside-the-repo: NOT ANSWERED.** Recorded as open.
+  We notified regardless, which was always the plan, so the answer changes
+  nothing that has happened.
+- **(c) Sibling-clone goldens vs. vendored copies: NOT ANSWERED.** Recorded as
+  open, and this one still has teeth: it governs decision D7. An answer
+  preferring vendored vectors would change how this repository consumes the
+  corpus, and that rework is not filed as cards because no answer has come.
+
+Three of four questions stand open. They are listed as unanswered rather than
+inferred from the authorization, because reading silence as assent is the
+species of overclaim this repository exists to argue against.

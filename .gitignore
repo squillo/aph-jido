@@ -5,3 +5,17 @@ doc/
 erl_crash.dump
 demo/_build
 demo/deps
+
+# node, only ever present under the sibling aph clone, but a stray local
+# install here must not become a commit
+node_modules/
+
+# macOS and editor droppings; a global gitignore catches these on the machine
+# that built this, which is exactly why they belong here too
+.DS_Store
+*.swp
+
+# nothing in this repository reads a .env, and that is the point: if one
+# appears, it was not meant to be published
+.env
+.env.*
