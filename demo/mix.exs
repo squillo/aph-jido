@@ -34,7 +34,12 @@ defmodule Demo.MixProject do
       # actions with Jido.Action, and builds/sends signals with
       # Jido.Signal + Jido.AgentServer.
       {:jido, "~> 2.3"},
-      {:jido_signal, "~> 2.2"}
+      {:jido_signal, "~> 2.2"},
+      # Declared here as well as in the library, because the CI gate runs for
+      # BOTH apps (PRD-001 T15) and `mix deps.audit` scans the lockfile of the
+      # project it is invoked in. demo/mix.lock is its own resolution, so it
+      # needs its own auditor.
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
     ]
   end
 end

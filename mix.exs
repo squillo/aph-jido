@@ -35,7 +35,12 @@ defmodule JidoAph.MixProject do
       {:jido_signal, "~> 2.2"},
       # Sibling-clone path dep (PRD-001 D1/D3): aph-ex is not on hex.pm, and a
       # sparse git dep provably breaks its NIF's ../../../rust/aph-core path.
-      {:aph, path: "../aph/interpreters/elixir"}
+      {:aph, path: "../aph/interpreters/elixir"},
+      # Supplies `mix deps.audit`, the last step of the CI gate PRD-001 §4
+      # names (T15). The task is NOT in Mix — without this dependency it does
+      # not exist, and a gate step that never runs proves nothing. dev/test
+      # only and runtime: false, so nothing a consumer ships carries it.
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
     ]
   end
 end

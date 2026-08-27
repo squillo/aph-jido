@@ -1,0 +1,345 @@
+name: CI
+
+# The core pipeline is deliberately Node-free (PRD-001 T15). The optional
+# `:deep` job — the only place Node exists in this repository — is a separate
+# card (T16) and lands separately in this same file.
+#
+# Two checkouts, side by side under the workspace root:
+#
+#   $GITHUB_WORKSPACE/jido_aph/   this repository
+#   $GITHUB_WORKSPACE/aph/        the sibling protocol repo, SHA-pinned
+#
+# That layout is not cosmetic. Every path dependency and every runtime corpus
+# lookup in this project is written relative to a SIBLING clone — the library
+# resolves `../aph/interpreters/elixir`, the demo resolves
+# `../../aph/interpreters/elixir` and reads its goldens through the same
+# `:aph_repo_path` config default. Checking this repo out at the workspace
+# root, the way a single-repo workflow would, puts `../aph` outside the
+# workspace and breaks all of it. The two `path:` values below ARE the
+# contract.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: these jobs only read trees.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The sibling pin, spelled ONCE. Bumping it is a deliberate reviewed change
+  # (PRD-001 acceptance gate 6): the drift gate below fails on the new bytes,
+  # and absorbing that failure is the point of the pin, not a nuisance it
+  # causes. `squillo/aph` is a public repository, so no token is needed here.
+  APH_PIN: f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
+  APH_REPO: squillo/aph
+
+jobs:
+  core:
+    name: core gate (no Node)
+    # Pinned rather than `ubuntu-latest`, for the reason the sibling repo's own
+    # Elixir workflow records: erlef/setup-beam installs PRECOMPILED Erlang
+    # builds keyed by runner OS, so a runner image rolling forward can remove
+    # the OTP release this job asks for. A named image fails loudly at
+    # retirement instead of silently on a missing build.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        # Step-level `working-directory` overrides this and is itself relative
+        # to the workspace root, so demo steps say `jido_aph/demo` in full.
+        working-directory: jido_aph
+
+    steps:
+      - name: Check out jido_aph
+        uses: actions/checkout@v4
+        with:
+          path: jido_aph
+
+      - name: Check out the sibling aph clone at the pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APH_REPO }}
+          ref: ${{ env.APH_PIN }}
+          path: aph
+          # The drift gate below re-derives the SHA from the checkout itself
+          # rather than trusting this input, so `persist-credentials` buys
+          # nothing and is dropped.
+          persist-credentials: false
+
+      # ----------------------------------------------------------------------
+      # Cheap gates first. Both of these need only git and bash, and either one
+      # failing invalidates everything downstream of it — a drifted fixture
+      # makes every claim the suite prints attributable to bytes nobody
+      # reviewed. Running them before the toolchains means the failure arrives
+      # in seconds rather than after a NIF build.
+      # ----------------------------------------------------------------------
+
+      - name: Naming hygiene (PRD-001 gate 8, T14's script, unchanged)
+        run: scripts/hygiene_check.sh
+
+      - name: Fixture drift gate (PRD-001 gate 6)
+        working-directory: aph
+        run: |
+          set -euo pipefail
+
+          # 1. The checkout really is the pin. `actions/checkout` was ASKED for
+          #    it above; this asserts what landed on disk.
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$APH_PIN" ]; then
+            echo "::error::aph checkout is $head, expected the pin $APH_PIN"
+            exit 1
+          fi
+          echo "aph HEAD  $head"
+
+          # 2. The golden bytes are the recorded bytes. These three digests
+          #    were recomputed from the pinned checkout, never copied from any
+          #    README's prose — upstream's body-binding summary is stale, which
+          #    is exactly what the T2 governance erratum reports.
+          sums="$RUNNER_TEMP/aph-fixtures.sha256"
+          {
+            printf '%s  %s\n' \
+              8a6015d873786b533fa00f16b3f789a7984be61d631d5cd9e3515f7c5e721466 \
+              examples/principal_signed_envelope.json
+            printf '%s  %s\n' \
+              dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb \
+              examples/principal_signed_body.txt
+            printf '%s  %s\n' \
+              b8ffb64d42682db4406cc0c25d4c15f52c23eaff7da456aad5d82c6fb71a3640 \
+              examples/slack_reply_envelope.json
+          } > "$sums"
+
+          # `sha256sum` on Linux, `shasum -a 256` elsewhere: the same script is
+          # run against a fresh local clone before it is trusted here, and a
+          # developer machine may have only the second.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "$sums"
+          else
+            shasum -a 256 -c "$sums"
+          fi
+
+          # 3. The size pins, including bodySize 427 — the number the golden
+          #    envelope's own credentialSubject.communication.bodySize claims.
+          #    That the envelope's bodySha256 EQUALS the body digest above is
+          #    asserted in Elixir, against both sides recomputed at runtime,
+          #    by the library's corpus test; `mix test` below runs it.
+          check_size() {
+            actual="$(wc -c < "$1" | tr -d ' ')"
+            if [ "$actual" != "$2" ]; then
+              echo "::error::$1 is $actual bytes, recorded as $2"
+              exit 1
+            fi
+            printf 'ok  %-45s %s bytes\n' "$1" "$actual"
+          }
+          check_size examples/principal_signed_envelope.json 3382
+          check_size examples/principal_signed_body.txt 427
+          check_size examples/slack_reply_envelope.json 2148
+
+      # ----------------------------------------------------------------------
+      # The Node-free claim, proven rather than asserted.
+      #
+      # The runner image ships Node, and it must: the Actions runtime is itself
+      # Node, and it spawns its own binary by absolute path. Nothing this job
+      # could do would remove it, and pretending otherwise would be the exact
+      # class of overclaim PRD-001 §8 forbids. What CAN be proven is the claim
+      # that actually matters — that nothing this job RUNS ever reaches it. The
+      # shims below shadow node/npm/npx on PATH for every subsequent `run:`
+      # step, so an accidental invocation fails loudly with a named error
+      # instead of quietly succeeding and making the core pipeline a liar.
+      #
+      # This is also what keeps the `:deep` exclusion honest: the demo's
+      # `:deep`-tagged tests shell out to node, so if one ever escaped
+      # test_helper's default exclusion, this job would fail here rather than
+      # pass while secretly depending on a toolchain it says it does not need.
+      # ----------------------------------------------------------------------
+      - name: Shadow Node, so "no Node" is a fact and not a promise
+        run: |
+          set -euo pipefail
+          shim_dir="$RUNNER_TEMP/no-node"
+          mkdir -p "$shim_dir"
+          for bin in node npm npx; do
+            printf '%s\n' \
+              '#!/usr/bin/env bash' \
+              'echo "core pipeline invoked $(basename "$0"): this job is defined as Node-free (PRD-001 T15). The deep leg is the separate :deep job." >&2' \
+              'exit 127' \
+              > "$shim_dir/$bin"
+            chmod +x "$shim_dir/$bin"
+          done
+          echo "$shim_dir" >> "$GITHUB_PATH"
+
+      # ----------------------------------------------------------------------
+      # Toolchains.
+      #
+      # ONE pair, and it is the pair local development actually proved:
+      # Erlang/OTP 29.0.5 with Elixir 1.20.3 (cargo 1.96.0). `mix.exs` declares
+      # `elixir: "~> 1.18"` because that is jido's own floor, not because 1.18
+      # is what anything here has been run on — PRD-001 §3 names Elixir 1.18 /
+      # OTP 27 and that pair has never been exercised against this repository.
+      # The README's toolchain table records the same measured versions, and
+      # says in as many words that it is not a compatibility range.
+      # ----------------------------------------------------------------------
+      - name: Install Erlang/OTP and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29.0.5"
+          elixir-version: "1.20.3-otp-29"
+
+      # Mix drives the aph-ex NIF build through cargo, so this job needs both
+      # toolchains. A missing Rust toolchain would surface as a mix compile
+      # error rather than as what it is. The README promises a Rust toolchain
+      # is mandatory; this is where that promise is kept.
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # No cache, deliberately, and specifically no `_build` cache. jido_signal
+      # registers a Jido.Signal.Ext ONLY from an `@after_compile` hook, which a
+      # warm `_build` never fires (deps/jido_signal/lib/jido_signal/ext.ex) —
+      # so a cached build tree can produce a VM where `aph.notarization.v1` is
+      # absent and the wire-shape test exercises the silent-strip path instead
+      # of the one it means to pin. A cache that changes what the suite proves
+      # is worse than a slow job. A future card may cache `deps/` and the hex
+      # tarball cache, which are inputs rather than compiled state; `_build`
+      # must stay uncached, and this comment is the reason why.
+
+      - name: Record the toolchain this run actually used
+        run: |
+          set -euo pipefail
+          elixir --version
+          erl -noshell -eval 'io:format("~s~n", [erlang:system_info(otp_release)]), halt().'
+          cargo --version
+          rustc --version
+          # Proof, in the log, that the shim is in front: this must fail.
+          if node --version 2>/dev/null; then
+            echo "::error::node is reachable from this job; the shim did not take"
+            exit 1
+          fi
+          echo "node: shadowed (this job is Node-free)"
+
+      # ----------------------------------------------------------------------
+      # The gate, run for the library and then for the demo. Seven steps, in
+      # the order PRD-001 §4 names them:
+      #
+      #   deps.get, hex.audit, format --check-formatted,
+      #   compile --warnings-as-errors, test,
+      #   deps.unlock --check-unused, deps.audit
+      #
+      # Plus one addition, marked as such: a second warnings-as-errors compile
+      # under MIX_ENV=test. `mix compile` only compiles `lib/`, so without it
+      # a warning in a test file — or in the test-only corpus loader, which is
+      # `elixirc_paths(:test)`-gated and therefore invisible to the dev compile
+      # — would ride through the gate untouched.
+      #
+      # `deps.audit` comes from {:mix_audit, ...}, added to both mix.exs files
+      # by this card. It is not a Mix builtin: without the dependency the task
+      # does not exist, and a gate step that silently does not run is worse
+      # than no gate step at all.
+      # ----------------------------------------------------------------------
+
+      - name: library — deps.get
+        run: mix deps.get
+      - name: library — hex.audit
+        run: mix hex.audit
+      - name: library — format --check-formatted
+        run: mix format --check-formatted
+      - name: library — compile --warnings-as-errors
+        run: mix compile --warnings-as-errors
+      - name: library — compile --warnings-as-errors (test env)
+        run: mix compile --warnings-as-errors
+        env:
+          MIX_ENV: test
+      - name: library — test
+        run: mix test
+      - name: library — deps.unlock --check-unused
+        run: mix deps.unlock --check-unused
+      - name: library — deps.audit
+        run: mix deps.audit
+
+      - name: demo — deps.get
+        working-directory: jido_aph/demo
+        run: mix deps.get
+      - name: demo — hex.audit
+        working-directory: jido_aph/demo
+        run: mix hex.audit
+      # The root .formatter.exs does NOT cover demo/, so this is its own gate
+      # and not a duplicate of the library's.
+      - name: demo — format --check-formatted
+        working-directory: jido_aph/demo
+        run: mix format --check-formatted
+      - name: demo — compile --warnings-as-errors
+        working-directory: jido_aph/demo
+        run: mix compile --warnings-as-errors
+      - name: demo — compile --warnings-as-errors (test env)
+        working-directory: jido_aph/demo
+        run: mix compile --warnings-as-errors
+        env:
+          MIX_ENV: test
+      # No `--include deep` here, and none is wanted: `:deep` is excluded by
+      # default in demo/test/test_helper.exs, and the node shim above turns a
+      # leak into a failure rather than a silent Node dependency.
+      - name: demo — test (:deep excluded, and the shim proves it)
+        working-directory: jido_aph/demo
+        run: mix test
+      - name: demo — deps.unlock --check-unused
+        working-directory: jido_aph/demo
+        run: mix deps.unlock --check-unused
+      - name: demo — deps.audit
+        working-directory: jido_aph/demo
+        run: mix deps.audit
+
+      # ----------------------------------------------------------------------
+      # The transcript gate (PRD-001 acceptance gate 5, core half).
+      #
+      # `mix demo.run` is a gate as well as a story: it exits non-zero, after
+      # printing a DEVIATIONS block, when the run departs from what the
+      # transcript narrates. So the command succeeding is already an
+      # assertion. The greps below add the second half — that the specific
+      # sentences the honesty contract turns on are still being printed, and
+      # not quietly reworded into something weaker.
+      #
+      # Every needle is pure ASCII on purpose; the transcript itself is UTF-8
+      # (§, em dashes), which is why the locale is set rather than left to the
+      # runner's default.
+      # ----------------------------------------------------------------------
+      - name: mix demo.run, and the sentences CI will not let drift
+        working-directory: jido_aph/demo
+        env:
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/demo_run.stdout"
+          mix demo.run > "$out"
+          cat "$out"
+
+          needles=(
+            "[1] PROVENANCE"
+            "notarization-shaped, mode policy satisfied (PrincipalSigned)"
+            "APH_E012: attestation mode refused"
+            "APH_E013: proof chain invalid"
+            "[10] HONESTY FOOTER"
+          )
+          missing=0
+          for needle in "${needles[@]}"; do
+            if grep -qF -- "$needle" "$out"; then
+              printf 'found  %s\n' "$needle"
+            else
+              echo "::error::mix demo.run stdout no longer contains: $needle"
+              missing=1
+            fi
+          done
+          # The guard's own honesty rule, asserted against real stdout and not
+          # only in the suite: the bare words never appear outside the aph-ex
+          # warning the transcript quotes verbatim. `verified` must not appear
+          # at all — `PrincipalSigned` and `tagged unverified` are compounds
+          # and deliberately survive a word-boundary check.
+          if grep -qEi '(^|[^[:alnum:]_])verified([^[:alnum:]_]|$)' "$out"; then
+            echo "::error::mix demo.run stdout contains the bare word 'verified'"
+            missing=1
+          fi
+          [ "$missing" -eq 0 ]
