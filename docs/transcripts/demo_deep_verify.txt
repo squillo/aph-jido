@@ -1,0 +1,407 @@
+==============================================================================
+jido_aph — mix demo.deep_verify
+
+The optional second leg. The same golden envelope `mix demo.run` gated
+STRUCTURALLY is handed here to an independent implementation of the same
+specification — the aph repo's TypeScript verifier, running under node — which
+checks every signature. Read [7] and [8] before quoting anything from the
+middle: this leg adds a great deal, and there are still three things it does
+not do.
+==============================================================================
+
+
+[1] PROVENANCE — the bytes, and the verifier that ruled on them
+------------------------------------------------------------------------------
+Nothing here is vendored: neither the fixtures nor the verifier. Both are
+read at runtime from a sibling clone of the aph repo (PRD-001 D5/D7), so the
+SHA below is what attributes every verdict in this transcript to bytes a
+reader can fetch and re-run for themselves.
+
+  corpus + verifier     one sibling aph clone, resolved at runtime
+  aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
+  aph worktree          clean at HEAD
+  aph typescript/       source clean at HEAD
+
+  That last line is about SOURCE, and it is worth saying what it does not
+  cover: `dist/` is a build artifact, git-ignored upstream, so nothing here
+  can prove the built JavaScript was compiled from the source at that SHA.
+  Rebuilding it is one command, named in this task's own failure message,
+  and CI's :deep job builds it fresh at the pinned SHA (PRD-001 T16).
+
+  verifier              interpreters/typescript, under node
+    entry point         demo/priv/node/verify.mjs
+    calls               dist/src/verify.js  verifyEnvelope (§8.3 + §8.3.1)
+    dist                interpreters/typescript/dist  (inside the clone above)
+    node runtime        v26.3.0
+
+  The verifier runs in a SUBPROCESS, not on the BEAM. Zero cryptography runs
+  on the BEAM anywhere in this repository (PRD-001 §5), and aph-ex — the NIF
+  the guard is built on — exposes four structural operations and no signature
+  check at all, on purpose and parity-locked.
+
+  golden envelope       examples/principal_signed_envelope.json
+    bytes               3382
+    id                  urn:uuid:00000000-0000-4000-8000-0000000000f3
+    aphVersion          0.1
+    channel.kind        slack  (closed vocabulary, §7.1.5)
+    contentClass        Reply  (closed vocabulary, §7.1.6)
+    attestationMode     PrincipalSigned  (§7.1.7)
+    proof               2-element chain
+    mandate             embedded §6.1 mandate, allowedChannels ["slack"]
+    credentialStatus    absent — §6.3.3.4 case 1, SKIP (not a pass)
+
+  authorized body       examples/principal_signed_body.txt
+    bytes on disk       427
+    envelope claims     bodySize 427
+    envelope claims     bodySha256
+      dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb
+
+  `mix demo.run` quotes that digest and says plainly that it never recomputes
+  it. This leg does recompute it — inside node, over the body bytes as the
+  sidecar received them, never over a re-serialization of a parsed object
+  (§8.3 step 8). Leg [3] reports whether that check actually ran.
+
+
+[2] THE PIN — the instant every verdict below rests on
+------------------------------------------------------------------------------
+The borrowed verifier takes `now` as a PARAMETER and reads no clock. Its own
+source says why, at the top of src/verify.ts: "this verifier parses bytes it
+is handed and NEVER fetches", and separately, of `now`: "Required — this
+module reads no clock", because "a library that read its own clock could not
+be tested deterministically".
+
+So the caller pins the instant. This task pins it out loud:
+
+  pinned now            2026-05-21T12:00:00Z
+  envelope validFrom    2026-05-21T00:00:00Z
+  envelope validUntil   2026-05-22T00:00:00Z
+  inside the window     yes — compared on this run, not asserted
+  clock skew            60 s, the §8.3 RECOMMENDED default
+                        (DEFAULT_CLOCK_SKEW_SECONDS, src/types.ts)
+
+`now` is pinned because the window is fixed, not because time is negotiable.
+
+  The instant is not invented either: it is the aph repo's own
+  GOLDEN_EVALUATION_INSTANT (interpreters/typescript/testkit/golden.ts), so
+  this demo and its upstream evaluate the same fixture at the same moment.
+
+  A verifier that quietly read the wall clock would do two dishonest things
+  at once: it would pass today and fail tomorrow for reasons no reader could
+  see, and it would hide which instant a verdict rested on. Leg [5] runs the
+  same envelope against the real clock and is refused — which is what makes
+  this pin load-bearing rather than decorative.
+
+
+[3] LEG 1 — THE GOLDEN, VERIFIED AT THE PINNED INSTANT
+------------------------------------------------------------------------------
+The whole golden envelope — 3382 bytes of JSON TEXT, unparsed, exactly as
+it sits in the clone — plus the 427 authorized body bytes, plus the pinned
+instant, plus one key. Handed across a process boundary to verifyEnvelope and
+asked for the full §8.3 / §8.3.1 procedure.
+
+  require_mode          "PrincipalSigned"
+  now                   2026-05-21T12:00:00Z
+  body bytes supplied   yes, 427 — so §8.3 step 8 can run
+
+  outcome               VERIFIED — verifyEnvelope returned a VerifiedEnvelope
+
+  what it reports, in its own field names (src/verify.ts):
+      attestationMode         "PrincipalSigned"
+      bodyHashChecked         true
+      embeddedMandateChecked  true
+
+  Those last two are reports of what RAN, not of what is possible.
+  `bodyHashChecked: true` means §8.3 step 8 hashed the delivered bytes and
+  they matched the envelope's bodySha256. `embeddedMandateChecked: true`
+  means the §6.1 mandate embedded in this envelope's policy was checked —
+  its bindings to this human and this agent, its allowedChannels, its window
+  around the envelope's own, and BOTH of its signatures.
+
+    transport           envelope 3382 B, body 427 B
+                        measured by the verifier on the far side of the
+                        process boundary, and equal to what was handed in
+
+  Four Ed25519 signatures were checked in total: the principal's and the
+  notary's over the envelope, and the mandate's principalSignature and
+  notarySignature over their own §6.1 bases. `mix demo.run` checked none.
+
+  verifier steps, this leg:
+      D1   §7.1.7.1         RAN
+      D2   §8.3 step 1      RAN
+      D3   §8.3.1 step 1a   RAN
+      D4   §7.1.11          RAN
+      D5   §8.3 step 1b-1c  RAN
+      D6   §7.2.1 step 1e   RAN
+      D7   §8.3 steps 2-5   RAN
+      D8   §8.3.1 step 1d   RAN
+      D9   §8.3 step 6      RAN
+      D10  §8.3 step 8      RAN
+      D11  §8.3 step 8a     RAN — credentialStatus absent, so SKIP
+
+
+[4] KEY SOURCING — where each verifying key came from
+------------------------------------------------------------------------------
+The golden's two proofs are anchored two different ways, and the difference is
+the entire §8.4 story — the one this repository does not implement.
+
+One key handed in out of band, one that needs none, and zero fetched.
+
+  self-describing       1  (did:key — §8.4.3)
+      did:key:z6MkiaMbhXHNA4eJVCCj8dbzKzTgYDKf6crKgHVHid1F1WCT#z6MkiaMbhXHNA4eJVCCj8dbzKzTgYDKf6crKgHVHid1F1WCT
+
+  supplied out of band  1  (§8.4.4 would fetch; nothing here does)
+      did:web:notary.squillo.com#key-1
+
+  fetched               0
+
+  The human principal is a `did:key`: the identifier IS the public key,
+  base58-encoded behind a multicodec prefix, so it decodes offline and needs
+  nothing handed in. Its bytes travelled inside the envelope, on the signal,
+  through the guard, into node.
+
+  The notary is a `did:web`. A `did:web` key is published at a .well-known
+  document a verifier would FETCH (§8.4.4), and this leg fetches nothing — so
+  its key arrives as a parameter. Those bytes are neither invented nor
+  transcribed into this repository: demo/priv/node/verify.mjs imports
+  RFC8032_TEST_3 from the aph clone's own testkit — the published RFC 8032
+  §7.1 TEST 3 vector that examples/README.md names as the notary's seed
+  throughout that corpus. Anyone can re-derive it; nobody has to trust this
+  repository for it.
+
+  did:web:notary.squillo.com#key-1 is a FIXTURE IDENTIFIER.
+  It was not resolved, not fetched and not contacted, here or anywhere else
+  in this repository. A verdict above rests on a key a human handed the
+  verifier, and saying so is the whole purpose of this section.
+
+  The two lists together are the entire proof chain, because there is no
+  third source: resolveVerifyingKey (src/verify.ts) decodes a did:key or
+  reads the supplied map, and throws AphKeyUnavailableError for anything
+  else — so a method resolved by some other route could not have reached
+  this report.
+
+
+[5] LEG 2 — THE WALL-CLOCK BEAT: the same envelope, right now
+------------------------------------------------------------------------------
+The same bytes, the same key, the same everything — with `now` read from this
+machine's clock instead of pinned.
+
+  now                   2026-08-27T19:58:25.990272Z   <- varies every run
+  envelope window       2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
+
+  outcome               REFUSED on the validity window
+  code                  APH_E003
+  the verifier's own words, verbatim:
+      APH_E003 (MandateExpired): evaluated at 2026-08-27T19:58:25.990272Z,
+      outside the envelope window 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
+
+  Read that as the good news it is. The golden's window closed on
+  2026-05-22, so a fixture minted in May cannot be presented as authority
+  in August. §8.3 step 6 is exactly the rule that says so, with 60 seconds
+  of skew tolerance and not a day more.
+
+  It is also the proof that leg [3]'s pin is doing work. If `now` were
+  ignored, or defaulted, or quietly widened, this call would have returned
+  the same VerifiedEnvelope as leg [3]. It did not. The pin is stated in
+  section [2] rather than hidden precisely so this refusal can be shown
+  next to it instead of explained away.
+
+  Note what this refusal is NOT: it is not a signature problem. §8.3 step 6
+  runs at D9, after every signature in the document has already verified —
+  the enumeration below says so.
+
+  verifier steps, this leg:
+      D1   §7.1.7.1         RAN
+      D2   §8.3 step 1      RAN
+      D3   §8.3.1 step 1a   RAN
+      D4   §7.1.11          RAN
+      D5   §8.3 step 1b-1c  RAN
+      D6   §7.2.1 step 1e   RAN
+      D7   §8.3 steps 2-5   RAN
+      D8   §8.3.1 step 1d   RAN
+      D9   §8.3 step 6      REFUSED  <- the leg stops here
+      D10  §8.3 step 8      NOT REACHED
+      D11  §8.3 step 8a     NOT REACHED
+
+
+[6] LEG 3 — THE DEPTH-SPLIT BEAT: one envelope, two verdicts
+------------------------------------------------------------------------------
+Derived in memory, on this run, and written nowhere: the golden with the
+principal's proofValue replaced by the NOTARY's own. That is not a corrupted
+field — it is a genuine 64-byte Ed25519 signature in the same multibase
+base58btc spelling, over the wrong bytes. Nothing about the document's SHAPE
+is wrong: two-element proof chain, both DataIntegrityProof/eddsa-jcs-2022,
+both verificationMethods untouched, the PrincipalSigned label still matching
+the carriage §7.1.11 requires for it.
+
+The only thing wrong with it is that the human never signed it.
+
+Committed fixtures are never text-edited and derived negatives are never
+committed (PRD-001 §10 gate 4).
+
+HALF ONE — every check JidoAph.Guard runs, run on these exact bytes:
+
+    S1 §7.1.7.1         2736 B under the 65536 B bound: PASSES
+    S2 §8.3 step 1      strict parse: PASSES
+    S3 §8.3.1 step 1a   mode gate: :ok
+    S4 §7.1.11          proof structure: {:ok, "PrincipalSigned"}
+
+...and the composite, through the agent stack the demo actually ships. The
+real Demo.Agents.Gateway, mounting JidoAph.Guard with required: true and
+require_mode: "PrincipalSigned", was started and handed the forgery on a
+"slack.reply.requested" signal:
+
+  log [info] aph_guard: notarization-shaped, mode policy satisfied
+                (PrincipalSigned) — admitting signal "slack.reply.requested"
+  log [info] deliver_reply: would deliver (no channel adapter)
+
+    call/2 returned     {:ok, %Jido.Agent{}} — ADMITTED
+    routed action       Demo.Actions.DeliverReply RAN
+    context.aph.verdict
+        "notarization-shaped, mode policy satisfied (PrincipalSigned)"
+
+  The message would have gone out.
+
+HALF TWO — the same bytes, this leg:
+
+  outcome               REFUSED
+  code                  APH_E011
+  the verifier's own words, verbatim:
+      APH_E011 (PrincipalSignatureInvalid): the principal proof did not verify
+      over its §7.2.1 base (the envelope with the notary proof discarded,
+      `proof` kept as a ONE-ELEMENT ARRAY, and the principal's own proofValue
+      emptied)
+
+  control               still verifies (attestationMode "PrincipalSigned")
+                        the untampered golden, same call, same instant, run
+                        after the forgery — so the refusal above is the
+                        forgery's doing and not the harness's
+
+  One envelope. The structural gate admitted it and the action ran; the
+  signature check refused it. Both are correct, and the guard was never
+  wrong, because the guard never claimed this: its verdict says
+  "notarization-shaped, mode policy satisfied" and stops there, and aph-ex
+  says of the very operation it leans on hardest that a successful return
+  "says NOTHING about whether any signature verifies".
+
+This is why structural validity is never called verification.
+
+  It is also why a deployment running only the guard is not thereby broken:
+  it is a deployment that has chosen depth 0-1, and the honest thing is to
+  say which depth ran, in the log line, every time.
+
+  verifier steps, this leg:
+      D1   §7.1.7.1         RAN
+      D2   §8.3 step 1      RAN
+      D3   §8.3.1 step 1a   RAN
+      D4   §7.1.11          RAN
+      D5   §8.3 step 1b-1c  REFUSED  <- the leg stops here
+      D6   §7.2.1 step 1e   NOT REACHED
+      D7   §8.3 steps 2-5   NOT REACHED
+      D8   §8.3.1 step 1d   NOT REACHED
+      D9   §8.3 step 6      NOT REACHED
+      D10  §8.3 step 8      NOT REACHED
+      D11  §8.3 step 8a     NOT REACHED
+
+
+[7] WHAT THIS LEG ADDS over the structural gate
+------------------------------------------------------------------------------
+The eleven steps below are what verifyEnvelope really runs, in the order
+src/verify.ts runs them. D1-D4 are the same four JidoAph.Guard runs — the
+value there is not novelty but INDEPENDENCE: a second implementation, in a
+second language, reaching the same structural verdict. D5-D11 are the ones
+the guard cannot reach at all, because no cryptography runs on the BEAM.
+
+  D1   §7.1.7.1        envelope byte bound, before any parse
+  D2   §8.3 step 1     strict parse, unknown fields denied — and, unlike the
+                       guard's S2, the CLOSED channel and contentClass
+                       vocabularies of §7.1.5 / §7.1.6 enforced here
+  D3   §8.3.1 step 1a  attestation-mode policy (APH_E012)
+  D4   §7.1.11         label versus proof structure, both directions
+                       (APH_E013)
+  ------------------   everything below this line is new -----------------
+  D5   §8.3 step 1b-1c the PRINCIPAL's Ed25519 signature over its §7.2.1
+                       base — the envelope with the notary proof discarded,
+                       `proof` kept as a ONE-ELEMENT ARRAY, and the
+                       principal's own proofValue emptied (APH_E011)
+  D6   §7.2.1 step 1e  issuance order: the notary's decisionTimestamp, then
+                       the principal's proof, then the notary's — each
+                       signature covering only bytes that existed when it
+                       was made (APH_E013)
+  D7   §8.3 steps 2-5  the NOTARY's Ed25519 signature over its own §7.2.1
+                       base (APH_E001)
+  D8   §8.3.1 step 1d  the embedded §6.1 delegation mandate: bound to this
+                       human and this agent, its allowedChannels covering
+                       this channel, its window enclosing the envelope's,
+                       and its OWN two signatures — principalSignature
+                       (APH_E011) and notarySignature (APH_E006)
+  D9   §8.3 step 6     the validity window against the pinned `now`, 60 s
+                       skew (APH_E003)
+  D10  §8.3 step 8     bodySha256 recomputed over the body bytes AS
+                       RECEIVED — never over a re-serialization of a parsed
+                       object, because two JSON texts that parse equal can
+                       hash differently (APH_E009)
+  D11  §8.3 step 8a    credentialStatus. Absent here, so §6.3.3.4 case 1:
+                       SKIP. Present would be case 2 — REFUSED, APH_E008 —
+                       because a verifier with no status transport must not
+                       let an attacker who can break the status check
+                       thereby choose that it is skipped
+
+All canonicalization is JCS / RFC 8785. Four Ed25519 signatures in total,
+and every one of them sits in `mix demo.run`'s not-checked column.
+
+
+[8] WHAT IT STILL DOES NOT DO
+------------------------------------------------------------------------------
+Three things, and none of them is an oversight. Each is a network act, and
+this whole rail is offline by construction.
+
+  X1  NETWORK KEY DISCOVERY (§8.4). The borrowed verifier never fetches;
+      that is the first sentence of its own source. Nothing resolved a
+      did:web document, queried a DNS TXT record, or opened a socket. This
+      is exactly why the notary's key had to be handed in as a parameter —
+      section [4] names it, counts it and says where its bytes came from,
+      rather than letting a verdict quietly rest on an anchor nobody
+      declared.
+
+  X2  REVOCATION (§6.3.3). No status was consulted, because no status
+      transport exists in this repository at all. The golden carries no
+      credentialStatus member, so D11 skipped — correctly, and by the
+      specification's own trichotomy. An envelope that DID carry one would
+      be refused APH_E008 here, never waved through.
+
+  X3  THE LIVE NOTARY. did:web:notary.squillo.com#key-1 is a
+      fixture identifier and was never contacted. The live surface
+      did:web:aph-notary.squillo.com was not contacted either, by anything,
+      at any point.
+
+And one more, which is not about depth at all: nothing here was MINTED. The
+envelope is a pre-minted committed golden — 3382 bytes that were sitting
+in the clone before this task started — so running it asserts nothing
+whatsoever about whether a human authorized anything today. What it asserts
+is that the signatures on a document from May 2026 are the signatures that
+document claims, evaluated at an instant this transcript prints in full.
+
+
+[9] HONESTY FOOTER — what to say, and what not to, about this run
+------------------------------------------------------------------------------
+Say this: the golden envelope independently passes full offline §8.3 in a
+second implementation of the specification — all four Ed25519 signatures
+over their RFC 8785 canonical bases, issuance order, the embedded mandate's
+bindings and both of its signatures, the validity window against a PINNED
+instant that this transcript prints, and bodySha256 recomputed over the body
+bytes as received — with exactly one key supplied out of band, named in
+section [4].
+
+Do not say this: that any key was discovered, that any revocation status was
+checked, that any notary was contacted, or that anything was minted.
+
+And do not read leg [6] backwards. The structural gate admitted a forgery and
+was not thereby wrong: it answered the question it was asked, in the words it
+was allowed to use. The failure mode this repository is built to avoid is not
+a shallow check — it is a shallow check DESCRIBED as a deep one.
+
+The structural leg, which needs no Node and reaches no network:
+
+    mix demo.run
+
+==============================================================================
