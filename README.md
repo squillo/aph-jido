@@ -28,8 +28,13 @@ binding's own documentation, quoted here verbatim from
 
 So `JidoAph.Guard` does not say it. Its fixed verdict wording is
 **`notarization-shaped, mode policy satisfied`**, and the bare words
-"verified" and "signed" never appear in its log output. That is asserted by
-test over real captured logs, in four places: the demo's happy path, its
+"verified" and "signed" never appear in anything the guard *writes*. Scoped to
+its own words on purpose, because a refusal log line is not all the guard's:
+aph-ex's messages pass through verbatim, and a strict-parse refusal quotes the
+offending field name back, so an envelope carrying a top-level field named
+`verified` logs ``unknown field `verified`, expected one of …``. That fragment
+is the sender's word, not the gate's. Everything the guard authors is asserted
+by test over real captured logs, in four places: the demo's happy path, its
 refusal matrix, and both transcript tests. The assertions are word-boundary
 matches, not substring bans, because the guard must be free to write
 `PrincipalSigned` (closed spec vocabulary, §7.1.7) and `tagged unverified` —
