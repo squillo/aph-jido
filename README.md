@@ -1423,8 +1423,8 @@ on.
 `.github/workflows/ci.yml` carries both jobs — `core gate (no Node)` and `deep
 leg (optional, Node >= 20)` — and **both passed on the first run Actions ever
 executed for this repository**:
-[run 33125739927](https://github.com/squillo/aph-jido/actions/runs/33125739927),
-commit `7fcf0a1`, 2026-08-27.
+[run 33126658704](https://github.com/squillo/aph-jido/actions/runs/33126658704),
+commit `00495e7`, 2026-08-27.
 
 That sentence is worth stating precisely, because it was false until the moment
 it wasn't. Until the publishing push there was no remote, so every gate
