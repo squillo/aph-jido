@@ -47,7 +47,7 @@ env:
   # fetched, and this drift gate decides whether its bytes are the recorded
   # ones. A mismatch fails the gate below, which is the point of the pin
   # rather than a nuisance it causes (PRD-001 acceptance gate 6).
-  APH_PIN: f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
+  APH_PIN: 9b94ec13b7a5ada079e661e068734736e20ae9eb
 
 jobs:
   core:

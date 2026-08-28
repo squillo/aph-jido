@@ -18,11 +18,19 @@ defmodule JidoAph.EnvelopeTest do
 
   @moduletag capture_log: true
 
+  # The corpus is enumerated from upstream's OWN manifest
+  # (examples/manifest.json, "one corpus manifest, measured by every
+  # binding"), not from a glob. A glob was what we had, and bumping the pin
+  # broke it the moment upstream added the manifest itself as a 13th .json —
+  # a file that is not an envelope. Globbing a directory asks "what files are
+  # here"; the manifest answers "what is a conformance envelope", which is
+  # the question every assertion below actually depends on.
   defp goldens do
     Corpus.repo_path!()
-    |> Path.join("examples/*.json")
-    |> Path.wildcard()
-    |> Enum.map(&Path.basename/1)
+    |> Path.join("examples/manifest.json")
+    |> File.read!()
+    |> JSON.decode!()
+    |> Map.fetch!("conformance")
     |> Enum.sort()
   end
 
@@ -47,6 +55,10 @@ defmodule JidoAph.EnvelopeTest do
   # call site is on.
   test "every golden's normalized output decodes, and normalized bytes differ from the wire bytes" do
     names = goldens()
+
+    # Still pinned to a count, so a manifest that silently loses entries
+    # fails here rather than quietly testing less. The number tracks
+    # upstream's conformance set, not a directory listing.
     assert length(names) == 12
 
     for name <- names do

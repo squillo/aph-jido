@@ -82,7 +82,13 @@ defmodule Demo.RunTranscriptTest do
     refute transcript =~ "The validity window was never compared against any clock"
     assert transcript =~ "N3  Revocation was never consulted"
     assert transcript =~ "N4  bodySha256 was never recomputed"
-    assert transcript =~ "N5  The closed channel and contentClass vocabularies"
+    # The closed vocabularies left the never-run list when the pin moved past
+    # aph 57431e6 and those sets became field types — enforced at parse, with
+    # no op called. Pin the CORRECTION, so a transcript that quietly re-adds
+    # the old disclaimer (or drops the explanation) fails here.
+    refute transcript =~ "The closed channel and contentClass vocabularies were never enforced"
+    assert transcript =~ "field TYPES (aph 57431e6)"
+    assert transcript =~ "N5  The live notary"
     assert transcript =~ "did:web:aph-notary.squillo.com was not contacted"
     assert transcript =~ Demo.Narrative.aph_ex_quote()
   end

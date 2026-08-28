@@ -409,4 +409,36 @@ defmodule JidoAph.GuardTest do
     assert reason =~ "window check"
     assert reason =~ ":clock"
   end
+
+  # Why this test exists: closed-vocabulary enforcement arrived for FREE when
+  # the pin moved past aph 57431e6, where the channel-kind and content-class
+  # sets stopped being strings validated by a helper and became the FIELD
+  # TYPES in aph-core. A violating envelope can no longer be constructed, so
+  # the refusal happens at deserialization and nothing downstream can observe
+  # a violation — the guard gained a check it never wrote a line for.
+  #
+  # It is pinned here because a capability nobody tests is one a future pin
+  # bump can silently remove. Note what the refusal is NOT: no APH_E code and
+  # no signature claim — it is a strict-parse refusal (§8.3 step 1), which is
+  # the same door unknown fields are refused at.
+  test "the closed channel and contentClass sets are enforced at parse (§7.1.5 / §7.1.6)" do
+    tamper = fn path, value ->
+      golden() |> JSON.decode!() |> put_in(path, value) |> JSON.encode!()
+    end
+
+    for {path, value, label} <- [
+          {["credentialSubject", "channel", "kind"], "carrier_pigeon", "channel kind"},
+          {["credentialSubject", "communication", "contentClass"], "Ransom", "content class"}
+        ] do
+      assert {:error, reason} =
+               Guard.prepare_signal(
+                 signal_with(tamper.(path, value)),
+                 ctx(%{clock: @pinned_now})
+               ),
+             "#{label} outside its closed set must be refused"
+
+      assert reason =~ "closed set", "#{label}: refusal should name the closed set"
+      refute reason =~ "APH_E", "#{label}: this is a strict-parse refusal, not a coded one"
+    end
+  end
 end

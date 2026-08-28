@@ -65,7 +65,7 @@ defmodule Demo.Narrative do
   # The never-run list, PRD-001 §3 step 2's "and which did NOT". Rendered in
   # full in the honesty footer, referenced by tag on every leg.
   @never_run_line_1 "N1 signatures     N2 key discovery   N3 revocation"
-  @never_run_line_2 "N4 bodySha256     N5 closed vocab    N6 live notary"
+  @never_run_line_2 "N4 bodySha256     N5 live notary"
 
   # aph-ex's own warning about the op this gate leans on hardest, quoted from
   # ../aph/interpreters/elixir/lib/aph.ex (the @doc on verify_proof_structure/1)
@@ -324,8 +324,7 @@ defmodule Demo.Narrative do
         "N2  key discovery — DNS TXT / did:web (§8.4)",
         "N3  revocation / credentialStatus",
         "N4  bodySha256 over the received bytes (§8.3 step 8, APH_E009)",
-        "N5  closed channel / contentClass vocabulary (§7.1.5 / §7.1.6)",
-        "N6  the live notary — never contacted, by anything, at any point",
+        "N5  the live notary — never contacted, by anything, at any point",
         "",
         "Each leg names, from what actually happened, which of S1-S4 RAN, which one",
         "REFUSED, and which were NEVER REACHED. N1-N6 are constant: they are what",
@@ -744,10 +743,14 @@ defmodule Demo.Narrative do
         "      digest quoted in the banner",
         "      (#{communication["bodySha256"]})",
         "      is the envelope's own claim (§8.3 step 8, APH_E009).",
-        "  N5  The closed channel and contentClass vocabularies were never enforced.",
-        "      aph-ex exposes no such op (§7.1.5 / §7.1.6).",
-        "  N6  The live notary at did:web:aph-notary.squillo.com was not contacted,",
+        "  N5  The live notary at did:web:aph-notary.squillo.com was not contacted,",
         "      by anything, at any point. Nothing above reached the network at all.",
+        "",
+        "  The closed channel and contentClass vocabularies LEFT this list too, and",
+        "  for a better reason than the window did: upstream made those sets the",
+        "  field TYPES (aph 57431e6), so an envelope naming a channel outside them",
+        "  cannot be constructed and S2 refuses it at parse. No op is called and no",
+        "  code here enforces it — the guard gained the check by moving its pin.",
         "",
         "  The validity window IS checked, and used not to be — which is why it is",
         "  no longer on this list. Until 2026-08-28 the gate had no window check at",

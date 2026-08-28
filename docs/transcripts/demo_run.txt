@@ -18,7 +18,7 @@ reader can fetch for themselves.
   corpus source         the :aph dependency's checkout, resolved at
                         runtime (APH_PATH, or an explicit
                         :aph_repo_path, override it)
-  aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
+  aph HEAD              9b94ec13b7a5ada079e661e068734736e20ae9eb
   aph worktree          clean at HEAD
   aph examples/         clean
 
@@ -94,8 +94,7 @@ N1  Ed25519 signatures over JCS/RFC 8785 (§8.3)
 N2  key discovery — DNS TXT / did:web (§8.4)
 N3  revocation / credentialStatus
 N4  bodySha256 over the received bytes (§8.3 step 8, APH_E009)
-N5  closed channel / contentClass vocabulary (§7.1.5 / §7.1.6)
-N6  the live notary — never contacted, by anything, at any point
+N5  the live notary — never contacted, by anything, at any point
 
 Each leg names, from what actually happened, which of S1-S4 RAN, which one
 REFUSED, and which were NEVER REACHED. N1-N6 are constant: they are what
@@ -171,7 +170,7 @@ about this run: nothing here was minted, and no human authorized anything.
       S5  §8.3 step 6     RAN
   never run, this or any leg:
       N1 signatures     N2 key discovery   N3 revocation
-      N4 bodySha256     N5 closed vocab    N6 live notary
+      N4 bodySha256     N5 live notary
 
 
 [4] LEG 2 — REFUSAL 1/6: no notarization extension, required: true
@@ -208,7 +207,7 @@ halves, the rejection and the log line, are visible in this block.
       S5  §8.3 step 6     NOT REACHED
   never run, this or any leg:
       N1 signatures     N2 key discovery   N3 revocation
-      N4 bodySha256     N5 closed vocab    N6 live notary
+      N4 bodySha256     N5 live notary
 
 
 [5] LEG 3 — REFUSAL 2/6: a forged PrincipalSigned label (APH_E013)
@@ -254,7 +253,7 @@ never edited (PRD-001 §10 gate 4).
       S5  §8.3 step 6     not attributable
   never run, this or any leg:
       N1 signatures     N2 key discovery   N3 revocation
-      N4 bodySha256     N5 closed vocab    N6 live notary
+      N4 bodySha256     N5 live notary
 
 
 [6] LEG 4 — REFUSAL 3/6: mode-absent vs a PrincipalSigned policy (APH_E012)
@@ -303,7 +302,7 @@ Its structure is sound, so the refusal is the mode policy and nothing else.
       S5  §8.3 step 6     not attributable
   never run, this or any leg:
       N1 signatures     N2 key discovery   N3 revocation
-      N4 bodySha256     N5 closed vocab    N6 live notary
+      N4 bodySha256     N5 live notary
 
 
 [7] LEG 5 — REFUSAL 4/6: an unknown envelope field (strict parse, no code)
@@ -343,7 +342,7 @@ that never parsed reached no protocol rule and may cite none.
       S5  §8.3 step 6     not attributable
   never run, this or any leg:
       N1 signatures     N2 key discovery   N3 revocation
-      N4 bodySha256     N5 closed vocab    N6 live notary
+      N4 bodySha256     N5 live notary
 
 
 [8] LEG 6 — REFUSAL 5/6: over the byte bound, refused before any parse
@@ -378,7 +377,7 @@ the strict parser ADMITS these very bytes.
       S5  §8.3 step 6     not attributable
   never run, this or any leg:
       N1 signatures     N2 key discovery   N3 revocation
-      N4 bodySha256     N5 closed vocab    N6 live notary
+      N4 bodySha256     N5 live notary
 
 
 [9] LEG 7 — ROW 6/6: a bare signal under required: false, delivered tagged
@@ -414,7 +413,7 @@ Delivery happens; it happens FLAGGED.
       S5  §8.3 step 6     NOT REACHED
   never run, this or any leg:
       N1 signatures     N2 key discovery   N3 revocation
-      N4 bodySha256     N5 closed vocab    N6 live notary
+      N4 bodySha256     N5 live notary
 
 
 [10] HONESTY FOOTER — what this run did not establish
@@ -440,10 +439,14 @@ included:
       digest quoted in the banner
       (dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb)
       is the envelope's own claim (§8.3 step 8, APH_E009).
-  N5  The closed channel and contentClass vocabularies were never enforced.
-      aph-ex exposes no such op (§7.1.5 / §7.1.6).
-  N6  The live notary at did:web:aph-notary.squillo.com was not contacted,
+  N5  The live notary at did:web:aph-notary.squillo.com was not contacted,
       by anything, at any point. Nothing above reached the network at all.
+
+  The closed channel and contentClass vocabularies LEFT this list too, and
+  for a better reason than the window did: upstream made those sets the
+  field TYPES (aph 57431e6), so an envelope naming a channel outside them
+  cannot be constructed and S2 refuses it at parse. No op is called and no
+  code here enforces it — the guard gained the check by moving its pin.
 
   The validity window IS checked, and used not to be — which is why it is
   no longer on this list. Until 2026-08-28 the gate had no window check at

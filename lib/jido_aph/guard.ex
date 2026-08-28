@@ -41,8 +41,13 @@ defmodule JidoAph.Guard do
   configured, **"mode policy satisfied"**. That is the guard's entire claim.
   Per aph-ex, a structure pass "says NOTHING about whether any signature
   verifies" — this guard runs zero cryptography, checks no signatures, no
-  keys, no bodySha256, no closed vocabulary, and no revocation.
-  Cryptographic depth belongs to a deep verifier outside this gate.
+  keys, no bodySha256, and no revocation. Cryptographic depth belongs to a
+  deep verifier outside this gate.
+
+  Two non-cryptographic checks it DOES make, both easy to miss: the closed
+  channel-kind and content-class vocabularies (§7.1.5/§7.1.6), enforced at
+  parse since aph `57431e6` turned those sets into the field types — no op
+  to call and no code here to maintain — and the validity window, below.
 
   It DOES check the validity window (§8.3), because that is a `DateTime`
   comparison rather than a cipher and the "no cryptography" line never
@@ -162,7 +167,7 @@ defmodule JidoAph.Guard do
   | Embedded delegation-mandate binding (§8.3.1 step 1d) | no | YES | |
   | Validity window (§8.3, 60s skew) | YES — `:check_window`, default on | YES — against pinned `now`, stated | |
   | bodySha256 over received bytes (§8.3 step 8, APH_E009) | no | YES | |
-  | Closed channel/contentClass vocabulary (§7.1.5/§7.1.6) | no (aph-ex exposes no such op) | YES (TS enforces) | |
+  | Closed channel/contentClass vocabulary (§7.1.5/§7.1.6) | YES — at parse, since aph 57431e6 made the sets the field TYPES; no op to call | YES (TS enforces) | |
   | Key discovery: DNS TXT / did:web (§8.4) | no | no (TS never fetches; did:key decodes offline; the golden's one did:web notary key is supplied via `options.keys` and the transcript says so) | YES — named in README |
   | Revocation / credentialStatus transport | no | no (golden carries none; TS refuses status-bearing envelopes) | YES — named in README |
   | Live notary contact | no | no | YES — named in README |
