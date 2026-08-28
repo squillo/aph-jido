@@ -235,6 +235,7 @@ defmodule JidoAph.Guard do
                      refusal: Zoi.literal(:refuse_and_log) |> Zoi.default(:refuse_and_log),
                      depth: Zoi.enum([:structural, :deep]) |> Zoi.default(:structural),
                      deep_verifier: Zoi.atom() |> Zoi.default(nil),
+                     protect_actions: Zoi.list(Zoi.atom()) |> Zoi.default([]),
                      check_window: Zoi.boolean() |> Zoi.default(true),
                      clock: Zoi.any() |> Zoi.default(:system),
                      clock_skew_seconds: Zoi.integer() |> Zoi.default(60)
@@ -285,6 +286,70 @@ defmodule JidoAph.Guard do
       # exclude a signal (the hook is simply never invoked) — no tag, no
       # claim, because nothing was examined.
       {:ok, signal, %{}}
+    end
+  end
+
+  @doc """
+  Post-routing authorization: refuses a routed Action when a signal in the
+  guard's scope arrives carrying no admit verdict.
+
+  ## Why this hook exists at all
+
+  `prepare_signal/2` gates on the way IN, and until 2026-08-28 that was the
+  guard's only hook — which meant the guard was advisory rather than a gate.
+  Four paths were proven to route an Action without `prepare_signal/2` ever
+  seeing the signal; two of them are closable from a plugin and this closes
+  them:
+
+    * a co-mounted plugin returning `{:override, Action, renamed_signal}`,
+      where the RENAME dodges this guard's `:signal_patterns` and the
+      original gate never ran on the type that actually routed;
+    * a route whose pattern is wider than the guard's — `"slack.reply.*"`
+      against `["slack.reply.requested"]` — where a sibling type routes the
+      same Action with the gate silently out of scope.
+
+  The other two (`Jido.Agent.cmd/3` and `%Directive.RunInstruction{}`) never
+  enter the hook chain at all and CANNOT be closed from here. They are the
+  action's own responsibility, and `DeliverReply`'s moduledoc said otherwise
+  until this landed.
+
+  ## The rule
+
+  Fail closed, and only where this guard has standing: if the signal is in
+  the configured scope and the accumulated runtime context carries no `:aph`
+  verdict, refuse. Out-of-scope signals pass — this plugin was configured
+  not to speak for them, and inventing an opinion about traffic another
+  mount owns is how a gate becomes a nuisance.
+
+  A verdict from `prepare_signal/2` is the ONLY thing accepted as proof the
+  gate ran. It cannot be forged by the sender: the runtime context is
+  authored by the receiving agent's own hook chain and never travels on the
+  wire (see the `:required` note above for why the tag lives here).
+  """
+  @impl Jido.Plugin
+  def prepare_action(%Jido.Signal{} = signal, action_arg, context) do
+    config = Map.get(context, :config) || %{}
+
+    protected? = protected_action?(action_arg, Map.get(config, :protect_actions, []))
+
+    if protected? or in_scope?(signal.type, Map.get(config, :signal_patterns, [])) do
+      case get_in(context, [:runtime_context, :aph]) do
+        nil ->
+          Logger.warning(
+            "aph_guard: refusing to run the action routed from #{inspect(signal.type)}: " <>
+              "the signal is in this guard's scope but carries no admit verdict, so " <>
+              "prepare_signal/2 never gated it"
+          )
+
+          {:error,
+           "aph_guard: action refused — #{inspect(signal.type)} is in scope but reached " <>
+             "routing with no admit verdict; prepare_signal/2 never gated this signal"}
+
+        _verdict ->
+          {:ok, %{}}
+      end
+    else
+      {:ok, %{}}
     end
   end
 
@@ -341,6 +406,36 @@ defmodule JidoAph.Guard do
   # [] matches everything; trailing ".*" is a multi-segment prefix match
   # excluding the bare prefix; interior "*" is single-segment; otherwise
   # equality.
+  # Scope answers "is this signal type mine?", which a RENAME defeats by
+  # construction: a co-mounted plugin returning {:override, Action, renamed}
+  # produces a type the patterns do not match, so a scope-only check waves it
+  # through while the original Action still runs. Authorizing the resolved
+  # ACTION is the rename-proof question, and it is the one this hook was built
+  # to ask — `action_arg` is handed to us precisely so the answer does not
+  # depend on what the signal calls itself.
+  #
+  # Empty list = nothing named = scope alone decides, which is the v1 default
+  # and NOT a silent one: an unconfigured :protect_actions cannot know a
+  # deployment's action modules, and inventing a list would be worse than
+  # saying so in the docs.
+  defp protected_action?(_action_arg, []), do: false
+  defp protected_action?(_action_arg, nil), do: false
+
+  defp protected_action?(action_arg, protected) when is_list(protected) do
+    action_arg |> action_modules() |> Enum.any?(&(&1 in protected))
+  end
+
+  # `action_arg_from_spec/1` (deps/jido/lib/jido/agent_server.ex) hands us one
+  # spec, a list of them, or whatever else a route produced. Each spec is a
+  # module or a {module, opts} pair. Anything unrecognized yields no module,
+  # which means "not protected" — and that is safe here ONLY because scope is
+  # still checked alongside: an unreadable action never turns a refusal into
+  # an admit, it just fails to add one.
+  defp action_modules(list) when is_list(list), do: Enum.flat_map(list, &action_modules/1)
+  defp action_modules({mod, _opts}) when is_atom(mod), do: [mod]
+  defp action_modules(mod) when is_atom(mod) and not is_nil(mod), do: [mod]
+  defp action_modules(_other), do: []
+
   defp in_scope?(_type, []), do: true
   defp in_scope?(_type, nil), do: true
 

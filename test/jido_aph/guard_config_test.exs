@@ -69,6 +69,7 @@ defmodule JidoAph.GuardConfigTest do
              refusal: :refuse_and_log,
              depth: :structural,
              deep_verifier: nil,
+             protect_actions: [],
              check_window: true,
              clock: :system,
              clock_skew_seconds: 60
@@ -90,6 +91,7 @@ defmodule JidoAph.GuardConfigTest do
              refusal: :refuse_and_log,
              depth: :structural,
              deep_verifier: nil,
+             protect_actions: [],
              check_window: true,
              clock: :system,
              clock_skew_seconds: 60
