@@ -425,7 +425,7 @@ jobs:
       # neither existed at checkout time the way a sibling clone once did.
 
       - name: Fixture drift gate (this job stands alone)
-        working-directory: jido_aph/deps/aph
+        working-directory: jido_aph/demo/deps/aph
         run: |
           set -euo pipefail
           head="$(git rev-parse HEAD)"
