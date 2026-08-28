@@ -1,17 +1,18 @@
 import Config
 
-# PRD-001 D7: golden fixtures are read from the SHA-pinned sibling aph clone
-# at RUNTIME via the Application config key `:jido_aph, :aph_repo_path`. The
-# library default "../aph" resolves against File.cwd!() — correct from the
-# library root, WRONG from this nested app: demo tasks and tests run with
-# cwd == demo/, so the clone sits two levels up. Verified empirically (the
-# corpus-resolution test in test/demo_happy_path_test.exs asserts the
-# resolved path really contains the examples/ corpus).
+# PRD-001 D7: golden fixtures are read from a SHA-pinned aph checkout at
+# RUNTIME, never vendored. This app deliberately sets NO `:aph_repo_path`.
 #
-# The key belongs to the :jido_aph app on purpose — one key for the whole
-# repo, exactly as the library's own loader moduledoc prescribes for nested
-# apps (test/support/corpus.ex).
-config :jido_aph, aph_repo_path: "../../aph"
+# It used to set "../../aph", because the corpus came from a sibling clone and
+# this app sits one level deeper than the library, so the relative path had to
+# grow a level. The `:aph` dependency now arrives as git + `subdir:`, which
+# clones the WHOLE aph repository into demo/deps/aph — so Demo.Corpus locates
+# it through `Mix.Project.deps_paths()` instead, which is correct in both apps
+# without either one knowing how deep it sits.
+#
+# Setting the key here would override that and pin the demo to one layout
+# again. It stays available for anyone who wants it (an absolute path is the
+# safe spelling), and `APH_PATH` moves the dependency and the corpus together.
 
 # The demo transcript is an info-level narrative (the guard's admit/refuse
 # lines, the would-deliver beat); framework debug noise is not part of the

@@ -47,9 +47,12 @@ defmodule Mix.Tasks.Demo.Run do
 
   ## Prerequisites
 
-  A sibling clone of the aph repo, resolved at runtime through
-  `config :jido_aph, aph_repo_path: "../../aph"` (PRD-001 D7). Without it,
-  `Demo.Corpus` raises with the clone command spelled out.
+  An aph checkout, resolved at runtime (PRD-001 D7). `mix deps.get` is
+  normally the whole of it: the pinned `:aph` dependency is fetched with a
+  git `subdir:`, so the whole repository — `examples/` included — lands in
+  `deps/aph`. `APH_PATH`, or an explicit `config :jido_aph, :aph_repo_path`,
+  points at a live working tree instead. With none of them, `Demo.Corpus`
+  raises with the remedy spelled out.
   """
 
   use Mix.Task

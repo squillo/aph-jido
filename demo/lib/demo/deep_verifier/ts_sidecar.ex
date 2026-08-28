@@ -284,12 +284,14 @@ defmodule Demo.DeepVerifier.TsSidecar do
       :ok
     else
       unavailable(:dist_missing, """
-      the sibling clone's TypeScript build is missing or incomplete.
+      the aph checkout's TypeScript build is missing or incomplete.
 
       Absent: #{Enum.map_join(missing, ", ", &Path.relative_to(&1, repo))}
 
-      `dist/` is a build artifact and is git-ignored upstream, so a fresh
-      clone never has one.
+      `dist/` is a build artifact and is git-ignored upstream, so neither a
+      fresh clone nor a freshly fetched dependency ever has one: `mix
+      deps.get` brings the TypeScript sources but never builds them. This
+      leg is optional on purpose — the core demo runs without it.
 
       #{build_instructions(repo)}
       """)

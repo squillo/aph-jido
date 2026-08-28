@@ -92,16 +92,19 @@ defmodule Demo.HappyPathTest do
     refute log =~ ~r/\bsigned\b/i
   end
 
-  # Why this test exists: D7 puts the golden corpus in a sibling clone
-  # resolved at RUNTIME, and this nested app is exactly where the default
-  # "../aph" would silently resolve to the wrong depth. It pins that the
-  # demo's own config key lands on a real aph clone from the cwd demo tests
-  # and tasks actually run in, and that the fixture behind the whole demo is
-  # the one the PRD names — bodySize 427, agreeing with the bytes on disk.
-  # A drifted or vendored corpus fails here before any claim is made about
-  # it.
-  test "the demo's :aph_repo_path resolves to the sibling clone from demo/'s cwd" do
-    assert Application.get_env(:jido_aph, :aph_repo_path) == "../../aph"
+  # Why this test exists: D7 puts the golden corpus in a real aph checkout
+  # resolved at RUNTIME, and this nested app is exactly where a relative
+  # default would silently resolve to the wrong depth. It used to pin a
+  # config key of "../../aph"; the corpus now arrives inside the pinned
+  # :aph dependency, so what needs pinning is the OPPOSITE — that this app
+  # sets NO key and still lands on a real aph checkout from the cwd demo
+  # tests and tasks actually run in. A reintroduced hardcoded key fails
+  # here, as does a drifted or vendored corpus, before any claim is made
+  # about the fixture the PRD names (bodySize 427, agreeing with the bytes
+  # on disk).
+  test "the corpus resolves through the :aph dependency with no configured path" do
+    refute Application.get_env(:jido_aph, :aph_repo_path),
+           "demo/config/config.exs must not pin :aph_repo_path — the dependency locates the corpus"
 
     repo = Demo.Corpus.repo_path!()
     assert File.dir?(Path.join(repo, "examples"))

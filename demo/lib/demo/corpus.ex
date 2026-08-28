@@ -27,11 +27,29 @@ defmodule Demo.Corpus do
 
   ## Contract
 
-  Reads `Application.get_env(:jido_aph, :aph_repo_path, "../aph")` at CALL
-  time (never at compile time — a compile-time `Path.expand` at the wrong
-  depth is the documented silent-failure gotcha D7 exists to avoid). This
-  app sets the key to `"../../aph"` in `config/config.exs` because demo
-  tasks and tests run with `File.cwd!() == demo/`.
+  Resolves at CALL time (never at compile time — a compile-time
+  `Path.expand` at the wrong depth is the documented silent-failure gotcha
+  D7 exists to avoid), from three sources in this precedence:
+
+    1. `Application.get_env(:jido_aph, :aph_repo_path)`, when explicitly
+       set. Authoritative: set and wrong raises rather than resolving
+       somewhere else. This app does NOT set it.
+    2. `APH_PATH`, when set. `mix.exs` reads the same variable to point the
+       `:aph` dependency at a live working tree, so one export moves the
+       dependency and the corpus together. It names the aph repository
+       ROOT, not `interpreters/elixir`.
+    3. Otherwise the `:aph` dependency's own checkout. The dependency is
+       fetched as `git:` + `subdir: "interpreters/elixir"`, which clones
+       the WHOLE aph repository — `examples/` included — into
+       `demo/deps/aph`. A bare clone therefore has the corpus after
+       `mix deps.get`, with no sibling clone anywhere.
+
+  Source 3 is found through `Mix.Project.deps_paths()` rather than a
+  hardcoded `"deps/aph"`, because this app and the library each resolve
+  their own deps tree and a literal path would be wrong for one of them.
+  The dependency's project root is `interpreters/elixir` INSIDE the
+  repository, so the repository root is two levels above it; the
+  `examples/` check is what makes that derivation safe.
 
   Envelopes cross every boundary as JSON TEXT, so `example!/1` returns raw
   bytes; callers decode only to derive assertions or tamper-variants,
@@ -47,32 +65,73 @@ defmodule Demo.Corpus do
   """
   @spec repo_path!() :: Path.t()
   def repo_path! do
-    configured = Application.get_env(:jido_aph, :aph_repo_path, "../aph")
-    path = Path.expand(configured, File.cwd!())
+    {source, candidate} = candidate()
+    path = candidate && Path.expand(candidate, File.cwd!())
 
-    unless File.dir?(Path.join(path, "examples")) do
-      raise """
-      the demo cannot find the aph fixture corpus.
-
-      Looked for:   #{Path.join(path, "examples")}
-      Configured:   config :jido_aph, aph_repo_path: #{inspect(configured)}
-      Resolved from cwd #{File.cwd!()}
-
-      This demo reads its golden envelopes from a SIBLING CLONE of the aph
-      repo — it never vendors signed fixtures. Fix by cloning aph next to
-      the jido_aph repo:
-
-          git clone https://github.com/squillo/aph.git ../aph
-
-      and run demo tasks/tests from the demo/ directory, whose
-      config/config.exs points the key two levels up ("../../aph").
-      Absolute paths are safest:
-
-          config :jido_aph, aph_repo_path: "/path/to/aph"
-      """
+    unless path && File.dir?(Path.join(path, "examples")) do
+      raise unavailable_message(source, candidate, path)
     end
 
     path
+  end
+
+  defp candidate do
+    case Application.fetch_env(:jido_aph, :aph_repo_path) do
+      {:ok, configured} ->
+        {:config, configured}
+
+      :error ->
+        case System.get_env("APH_PATH") do
+          empty when empty in [nil, ""] -> {:dependency, dependency_checkout()}
+          root -> {:env, root}
+        end
+    end
+  end
+
+  # The `:aph` dependency's project root is `interpreters/elixir` inside the
+  # aph repository (git `subdir:`, an APH_PATH working tree and a legacy
+  # sibling `path:` alike), so the repository root — the thing that holds
+  # examples/ — is two levels above it.
+  defp dependency_checkout do
+    case Mix.Project.deps_paths() do
+      %{aph: dep_path} -> Path.expand("../..", dep_path)
+      _no_aph_dep -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp unavailable_message(source, candidate, path) do
+    looked = if path, do: Path.join(path, "examples"), else: "(nothing to look at)"
+
+    origin =
+      case source do
+        :config -> "config :jido_aph, aph_repo_path: #{inspect(candidate)}"
+        :env -> "APH_PATH=#{inspect(candidate)}"
+        :dependency -> "the :aph dependency's own checkout"
+      end
+
+    """
+    the demo cannot find the aph fixture corpus.
+
+    Looked for:   #{looked}
+    Source:       #{origin}
+    Resolved from cwd #{File.cwd!()}
+
+    Golden envelopes are read from a real aph checkout — this repo never
+    vendors signed fixtures. The usual fix is simply to fetch the pinned
+    dependency, which carries the whole aph repository including examples/:
+
+        mix deps.get
+
+    To work against a live aph tree instead, point APH_PATH at its ROOT
+    (the directory holding examples/ and interpreters/):
+
+        APH_PATH=/path/to/aph mix deps.get
+
+    An explicit `config :jido_aph, aph_repo_path: "/absolute/path"` still
+    wins over both, and is what this message reports when it is set.
+    """
   end
 
   @doc """

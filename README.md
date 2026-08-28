@@ -104,27 +104,43 @@ otherwise.
 
 ## Setup
 
-Two sibling clones. The dependency is a path dep — aph-ex is not on hex.pm.
+One clone.
 
 ```sh
-git clone https://github.com/squillo/aph.git
-git -C aph checkout f01e3470f86533c4099db8ab0ab6b155bd0ea4aa   # the pin, see below
-git clone https://github.com/squillo/aph-jido.git jido_aph     # sibling of aph, not inside it
-cd jido_aph
+git clone https://github.com/squillo/aph-jido.git
+cd aph-jido
 mix deps.get
 mix test
 ```
 
-Two things about those first two lines. The directory must be named `aph` and
-must sit beside this one, because `:aph_repo_path` defaults to `"../aph"`. And
-the checkout is **pinned on purpose**: CI pins the same SHA and fails on
-fixture drift, so a reader on `main` can hit a golden this repository's
-recorded digests do not describe while CI stays green. Skip the pin and you
-are testing against different bytes than the ones every claim here cites.
+**What `mix deps.get` pulls, and why it is one dependency instead of a second
+clone.** aph-ex is not on hex.pm, so `:aph` is fetched straight from git —
+`{:aph, git: "https://github.com/squillo/aph.git", subdir: "interpreters/elixir",
+ref: "f01e3470…"}`. A `subdir:` dependency clones the WHOLE repository and
+treats the subdirectory as the project root, which is what makes one dependency
+enough: `deps/aph/` ends up holding the Elixir binding, the Rust crate its NIF
+compiles against, the golden fixtures every test and the demo read, and the
+independent TypeScript implementation the deep leg shells out to.
 
-The clone directory is `jido_aph` while the repository is `aph-jido`: the
-Elixir application is `:jido_aph`, and keeping the checkout matching the app
-is the smaller surprise. Any directory name works; only `aph`'s does not.
+The `ref:` is a commit, deliberately. CI pins the same SHA and fails on fixture
+drift, so an unpinned dependency could hand a reader goldens whose bytes this
+repository's recorded digests do not describe, while CI stayed green. Bumping
+the pin means changing both the `ref:` in each `mix.exs` and the digests in
+`.github/workflows/ci.yml` — one reviewed change, which is the point.
+
+This used to be two sibling clones with a relative path dependency, and the
+first reader from outside the project hit exactly the wall that design built:
+`mix deps.get` succeeded, `mix compile` failed, and the message named a path
+without saying where to get it. See D3 in
+[PRD-001](PRDs/PRD-001-Jido-APH-Guard.md).
+
+**Developing against a live aph tree.** Set `APH_PATH` to the ROOT of an aph
+checkout — the directory holding `examples/` and `interpreters/` — and both
+apps switch the dependency and the fixture corpus to it together:
+
+```sh
+APH_PATH=/path/to/aph mix deps.get && APH_PATH=/path/to/aph mix test
+```
 
 A Rust toolchain is **mandatory**, not optional: the aph-ex binding is a
 rustler NIF that compiles from source, and no prebuilt `.so` ships. The first
@@ -159,35 +175,41 @@ mix test          # Node-free; :deep-tagged tests are excluded by default
 mix demo.run      # the structural leg — no Node, no network
 ```
 
-The corpus is read from the sibling clone at runtime through the application
-key `config :jido_aph, aph_repo_path:` (`"../aph"` at the library root,
-`"../../aph"` from `demo/`). A missing clone raises loudly with the exact
-`git clone` line rather than failing somewhere subtle.
+The corpus is read at runtime from the `:aph` dependency's own checkout —
+`deps/aph/examples/`, located through `Mix.Project.deps_paths()` so that the
+library and the demo each find their own. `APH_PATH`, or an explicit
+`config :jido_aph, aph_repo_path:`, overrides it. With none of them resolvable
+the loader raises loudly with the remedy rather than failing somewhere subtle.
 
 ### The optional deep leg
 
 Starting from `demo/`, where the previous block left you:
 
 ```sh
-cd ../../aph/interpreters/typescript && npm install && npm run build  # builds dist/
+cd deps/aph/interpreters/typescript && npm install && npm run build  # builds dist/
 cd -                       # back to demo/ — both commands below need it
 mix test --include deep    # or: APH_DEEP=1 mix test
 mix demo.deep_verify
 ```
 
+`dist/` is a build artifact, gitignored upstream, and `mix deps.get` fetches
+the TypeScript sources without building them — which is why this leg is
+optional and the core demo never needs Node.
+
 The `cd -` matters. Both mix commands live in the demo app: run them at the
 repository root instead and `mix demo.deep_verify` reports that the task does
-not exist, while `mix test --include deep` prints **`79 passed`** — the
+not exist, while `mix test --include deep` prints **`81 passed`** — the
 library suite, which contains no `:deep`-tagged tests at all. A pass for work
 that never ran is the one outcome this repository is built to refuse, so read
 that number as the wrong-directory signal it is.
 
-`npm install`, not `npm ci`: the sibling commits no lockfile and says why in
-its own `interpreters/typescript/.gitignore` — "a lockfile would be a
+`npm install`, not `npm ci`: upstream commits no lockfile and says why in its
+own `interpreters/typescript/.gitignore` — "a lockfile would be a
 durable-looking record of a dependency graph this package's whole claim is
 that it does not have. CI installs with `npm install`." `npm ci` refuses to
-run without one, so it fails on every fresh clone. The build writes only
-untracked artifacts into the sibling; nothing else here ever writes to it.
+run without one, so it fails on every fresh checkout. The build writes only
+untracked artifacts inside `deps/`; nothing here ever writes to the aph
+repository itself.
 
 `mix demo.deep_verify` degrades on purpose: with Node or the built `dist/`
 missing it prints `DEEP LEG UNAVAILABLE — nothing was verified, and nothing is
@@ -390,8 +412,8 @@ fails the build if it ever does.
 
 ## Provenance
 
-Every claim in this repository is attributable to specific bytes in the sibling
-clone. These digests were **recomputed from the fixture files**, not read out of
+Every claim in this repository is attributable to specific bytes in the
+SHA-pinned `:aph` dependency. These digests were **recomputed from the fixture files**, not read out of
 upstream prose — upstream's `examples/README.md` body-binding summary is
 currently stale, and this repository reports that as an erratum (see
 [Governance](#governance)) rather than repeating it.
@@ -505,7 +527,7 @@ lib/jido_aph/signal/ext/notarization.ex      the two single-constant identifiers
 lib/jido_aph/guard.ex                        the four-step structural gate
 lib/jido_aph/deep_verifier.ex                behaviour only — the seam
 test/jido_pins/                              jido 2.3.3 contracts, pinned by test
-test/support/corpus.ex                       runtime :aph_repo_path resolution
+test/support/corpus.ex                       runtime corpus resolution (dep, APH_PATH, config)
 docs/a2a-carry-mapping.md                    the mapping, derived from the pinned wire test
 docs/governance/                             the pre-production notification
 docs/transcripts/                            both committed transcripts
@@ -555,19 +577,24 @@ anything from the middle.
 
 [1] PROVENANCE — the exact bytes every claim below rests on
 ------------------------------------------------------------------------------
-Nothing here is vendored. The fixtures are read at runtime from a sibling
-clone of the aph repo (PRD-001 D7), so the SHA below is what attributes
-every claim in this transcript to bytes a reader can fetch for themselves.
+Nothing here is vendored. The fixtures are read at runtime from a real aph
+checkout (PRD-001 D7) — by default the pinned `:aph` dependency, whose git
+`subdir:` brings the whole repository into deps/, examples/ included. The
+SHA below is what attributes every claim in this transcript to bytes a
+reader can fetch for themselves.
 
-  corpus source         sibling aph clone, resolved at runtime from
-                        config :jido_aph, aph_repo_path: "../../aph"
+  corpus source         the :aph dependency's checkout, resolved at
+                        runtime (APH_PATH, or an explicit
+                        :aph_repo_path, override it)
   aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
   aph worktree          clean at HEAD
   aph examples/         clean
 
-  That SHA is READ from the clone, not asserted against a pin. Pinning it,
-  and failing the build on fixture drift, is CI's job (PRD-001 T15); the
-  demo's job is to say which bytes it actually ran on.
+  That SHA is READ from the checkout, not asserted against a pin. mix.exs
+  does pin the dependency by ref, but this banner reports what it FOUND —
+  an APH_PATH working tree would print its own SHA here. Failing the build
+  on fixture drift is CI's job (PRD-001 T15); the demo's job is to say
+  which bytes it actually ran on.
 
   golden envelope       examples/principal_signed_envelope.json
     bytes               3382
@@ -1015,11 +1042,12 @@ not do.
 [1] PROVENANCE — the bytes, and the verifier that ruled on them
 ------------------------------------------------------------------------------
 Nothing here is vendored: neither the fixtures nor the verifier. Both are
-read at runtime from a sibling clone of the aph repo (PRD-001 D5/D7), so the
-SHA below is what attributes every verdict in this transcript to bytes a
-reader can fetch and re-run for themselves.
+read at runtime from one aph checkout (PRD-001 D5/D7) — by default the
+pinned `:aph` dependency, which carries examples/ and interpreters/
+typescript/ alike. The SHA below is what attributes every verdict in this
+transcript to bytes a reader can fetch and re-run for themselves.
 
-  corpus + verifier     one sibling aph clone, resolved at runtime
+  corpus + verifier     one aph checkout, resolved at runtime
   aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
   aph worktree          clean at HEAD
   aph typescript/       source clean at HEAD
@@ -1187,13 +1215,13 @@ One key handed in out of band, one that needs none, and zero fetched.
 The same bytes, the same key, the same everything — with `now` read from this
 machine's clock instead of pinned.
 
-  now                   2026-08-27T19:58:25.990272Z   <- varies every run
+  now                   2026-08-28T02:47:15.136804Z   <- varies every run
   envelope window       2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
 
   outcome               REFUSED on the validity window
   code                  APH_E003
   the verifier's own words, verbatim:
-      APH_E003 (MandateExpired): evaluated at 2026-08-27T19:58:25.990272Z,
+      APH_E003 (MandateExpired): evaluated at 2026-08-28T02:47:15.136804Z,
       outside the envelope window 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
 
   Read that as the good news it is. The golden's window closed on
@@ -1432,10 +1460,10 @@ That sentence is worth stating precisely, because it was false until the moment
 it wasn't. Until the publishing push there was no remote, so every gate
 described above rested on a local replay of the workflow's own steps — real
 evidence, but not the thing the workflow claims. The run above is the thing
-itself: the sibling `aph` checkout resolved at the pinned SHA, the fixture
-digests matched, `mix demo.run` was executed on a machine with no Node and its
-transcript grepped, and the optional deep job built the sibling's TypeScript
-implementation and ran the `:deep` suite against it.
+itself: the `:aph` dependency resolved at the pinned SHA, the fixture digests
+matched, `mix demo.run` was executed on a machine with no Node and its
+transcript grepped, and the optional deep job built the TypeScript
+implementation from that same dependency and ran the `:deep` suite against it.
 
 Require the `core` check and nothing else: `deep` declares no `needs:` and
 nothing declares `needs: deep`, so it can be red, skipped, or deleted without

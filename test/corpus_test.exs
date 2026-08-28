@@ -43,8 +43,8 @@ defmodule JidoAph.CorpusTest do
   end
 
   # Why this test exists: bodySize 427 and the recorded golden hash pin the
-  # corpus (PRD-001 §10 gate 4) — if either drifts, the sibling clone moved
-  # off the pinned SHA and every downstream claim about the golden envelope
+  # corpus (PRD-001 §10 gate 4) — if either drifts, the resolved aph checkout
+  # moved off the pinned SHA and every downstream claim about the golden envelope
   # is unattributable. It recomputes BOTH sides at runtime: sha256 over the
   # body bytes actually read from disk, and the binding actually extracted
   # from the envelope JSON — then pins both to the recorded constant.
@@ -65,21 +65,56 @@ defmodule JidoAph.CorpusTest do
     assert communication["bodySize"] == byte_size(body)
   end
 
-  # Why this test exists: D7 chose runtime config precisely so a wrong
-  # checkout layout fails LOUDLY instead of silently resolving a
-  # compile-time path to the wrong depth. It pins that a bogus
-  # :aph_repo_path raises with the sibling-clone instruction (the clone
-  # command and the config key both named) rather than surfacing as a
-  # confusing File.Error deeper in the loader.
-  test "a bogus :aph_repo_path raises loudly with the sibling-clone instruction" do
-    previous = Application.fetch_env(:jido_aph, :aph_repo_path)
+  # Why this test exists: it is the regression pin for the defect the first
+  # outside reader hit — he cloned this repo alone, `mix deps.get` succeeded,
+  # and the build then failed on a sibling `../aph` that only a maintainer's
+  # machine had. With no config key and no APH_PATH, the corpus must resolve
+  # from the `:aph` DEPENDENCY's own checkout (mix.exs fetches it with
+  # `subdir:`, so deps/aph is the whole aph repo, examples/ included). It
+  # pins that the resolved root is the one derived from Mix's dependency
+  # path — never a hardcoded sibling — and that a golden really loads
+  # through it.
+  test "with no config and no APH_PATH, the corpus resolves inside the :aph dependency" do
+    restore_corpus_env()
+    Application.delete_env(:jido_aph, :aph_repo_path)
+    System.delete_env("APH_PATH")
 
-    on_exit(fn ->
-      case previous do
-        {:ok, value} -> Application.put_env(:jido_aph, :aph_repo_path, value)
-        :error -> Application.delete_env(:jido_aph, :aph_repo_path)
-      end
-    end)
+    path = JidoAph.Corpus.repo_path!()
+
+    assert File.dir?(Path.join(path, "examples"))
+    assert path == Path.expand("../..", Mix.Project.deps_paths()[:aph])
+    assert is_binary(JidoAph.Corpus.example!("principal_signed_envelope.json"))
+  end
+
+  # Why this test exists: APH_PATH is the maintainer escape hatch, and it is
+  # read by mix.exs and by this loader BOTH, so the two must agree that it
+  # names the repository ROOT. It pins that precedence: APH_PATH beats the
+  # dependency checkout, and an explicitly set :aph_repo_path beats APH_PATH.
+  test "APH_PATH names the repo root and an explicit :aph_repo_path outranks it" do
+    restore_corpus_env()
+
+    fake = Path.join(System.tmp_dir!(), "jido_aph_corpus_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(fake, "examples"))
+    on_exit(fn -> File.rm_rf!(fake) end)
+
+    Application.delete_env(:jido_aph, :aph_repo_path)
+    System.put_env("APH_PATH", fake)
+    assert JidoAph.Corpus.repo_path!() == fake
+
+    dependency_root = Path.expand("../..", Mix.Project.deps_paths()[:aph])
+    Application.put_env(:jido_aph, :aph_repo_path, dependency_root)
+    assert JidoAph.Corpus.repo_path!() == dependency_root
+  end
+
+  # Why this test exists: D7 chose runtime resolution precisely so a wrong
+  # checkout layout fails LOUDLY instead of silently reading the wrong bytes,
+  # and the message is the whole remedy a stranger gets. It pins that a bogus
+  # :aph_repo_path still raises (an explicitly set key is authoritative — it
+  # never falls through to the dependency), and that the message now leads
+  # with `mix deps.get` and names both other knobs, rather than telling the
+  # reader to go make a sibling clone.
+  test "a bogus :aph_repo_path raises loudly, and the message leads with mix deps.get" do
+    restore_corpus_env()
 
     Application.put_env(:jido_aph, :aph_repo_path, "/nonexistent/definitely-not-an-aph-clone")
 
@@ -88,8 +123,29 @@ defmodule JidoAph.CorpusTest do
         JidoAph.Corpus.example!("principal_signed_envelope.json")
       end
 
-    assert err.message =~ "SIBLING CLONE"
-    assert err.message =~ "git clone https://github.com/squillo/aph.git ../aph"
+    assert err.message =~ "mix deps.get"
+    assert err.message =~ "APH_PATH"
     assert err.message =~ "aph_repo_path"
+    assert err.message =~ "/nonexistent/definitely-not-an-aph-clone"
+    refute err.message =~ "git clone https://github.com/squillo/aph.git ../aph"
+  end
+
+  # Both knobs are process-global, so every test that touches one registers
+  # its restoration before mutating anything.
+  defp restore_corpus_env do
+    previous_config = Application.fetch_env(:jido_aph, :aph_repo_path)
+    previous_env = System.get_env("APH_PATH")
+
+    on_exit(fn ->
+      case previous_config do
+        {:ok, value} -> Application.put_env(:jido_aph, :aph_repo_path, value)
+        :error -> Application.delete_env(:jido_aph, :aph_repo_path)
+      end
+
+      case previous_env do
+        nil -> System.delete_env("APH_PATH")
+        value -> System.put_env("APH_PATH", value)
+      end
+    end)
   end
 end

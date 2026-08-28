@@ -10,19 +10,21 @@ name: CI
 # deleted outright cannot make the Node-free pipeline fail. That independence
 # is a PRD-001 acceptance-gate requirement (gate 7), not a convenience.
 #
-# Two checkouts, side by side under the workspace root:
+# One checkout, at $GITHUB_WORKSPACE/jido_aph/.
 #
-#   $GITHUB_WORKSPACE/jido_aph/   this repository
-#   $GITHUB_WORKSPACE/aph/        the sibling protocol repo, SHA-pinned
+# There used to be two. Every path dependency and every runtime corpus lookup
+# in this project was written relative to a SIBLING clone, so the workflow had
+# to check squillo/aph out beside this repo and both jobs carried the
+# choreography. The first outside reader hit the other end of that decision —
+# a bare clone failed to compile with nothing but a path in the message — and
+# the `:aph` dependency became a pinned `git:` + `subdir:`, which brings the
+# whole aph repository into deps/ on `mix deps.get`.
 #
-# That layout is not cosmetic. Every path dependency and every runtime corpus
-# lookup in this project is written relative to a SIBLING clone — the library
-# resolves `../aph/interpreters/elixir`, the demo resolves
-# `../../aph/interpreters/elixir` and reads its goldens through the same
-# `:aph_repo_path` config default. Checking this repo out at the workspace
-# root, the way a single-repo workflow would, puts `../aph` outside the
-# workspace and breaks all of it. The two `path:` values below ARE the
-# contract.
+# So the fixtures this workflow verifies and the TypeScript source the deep
+# job builds now arrive with the dependency, and the gates that read them run
+# AFTER deps.get rather than before. `jido_aph/` is kept as the checkout path
+# rather than the workspace root only because every `working-directory:` below
+# already says it; nothing depends on a sibling any more.
 
 on:
   push:
@@ -40,12 +42,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The sibling pin, spelled ONCE. Bumping it is a deliberate reviewed change
-  # (PRD-001 acceptance gate 6): the drift gate below fails on the new bytes,
-  # and absorbing that failure is the point of the pin, not a nuisance it
-  # causes. `squillo/aph` is a public repository, so no token is needed here.
+  # The aph pin, spelled once HERE and once in each mix.exs `ref:`. The two
+  # must agree and are bumped together: mix.exs decides which commit gets
+  # fetched, and this drift gate decides whether its bytes are the recorded
+  # ones. A mismatch fails the gate below, which is the point of the pin
+  # rather than a nuisance it causes (PRD-001 acceptance gate 6).
   APH_PIN: f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
-  APH_REPO: squillo/aph
 
 jobs:
   core:
@@ -68,17 +70,6 @@ jobs:
         with:
           path: jido_aph
 
-      - name: Check out the sibling aph clone at the pinned SHA
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.APH_REPO }}
-          ref: ${{ env.APH_PIN }}
-          path: aph
-          # The drift gate below re-derives the SHA from the checkout itself
-          # rather than trusting this input, so `persist-credentials` buys
-          # nothing and is dropped.
-          persist-credentials: false
-
       # ----------------------------------------------------------------------
       # Cheap gates first. Both of these need only git and bash, and either one
       # failing invalidates everything downstream of it — a drifted fixture
@@ -89,63 +80,6 @@ jobs:
 
       - name: Naming hygiene (PRD-001 gate 8, T14's script, unchanged)
         run: scripts/hygiene_check.sh
-
-      - name: Fixture drift gate (PRD-001 gate 6)
-        working-directory: aph
-        run: |
-          set -euo pipefail
-
-          # 1. The checkout really is the pin. `actions/checkout` was ASKED for
-          #    it above; this asserts what landed on disk.
-          head="$(git rev-parse HEAD)"
-          if [ "$head" != "$APH_PIN" ]; then
-            echo "::error::aph checkout is $head, expected the pin $APH_PIN"
-            exit 1
-          fi
-          echo "aph HEAD  $head"
-
-          # 2. The golden bytes are the recorded bytes. These three digests
-          #    were recomputed from the pinned checkout, never copied from any
-          #    README's prose — upstream's body-binding summary is stale, which
-          #    is exactly what the T2 governance erratum reports.
-          sums="$RUNNER_TEMP/aph-fixtures.sha256"
-          {
-            printf '%s  %s\n' \
-              8a6015d873786b533fa00f16b3f789a7984be61d631d5cd9e3515f7c5e721466 \
-              examples/principal_signed_envelope.json
-            printf '%s  %s\n' \
-              dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb \
-              examples/principal_signed_body.txt
-            printf '%s  %s\n' \
-              b8ffb64d42682db4406cc0c25d4c15f52c23eaff7da456aad5d82c6fb71a3640 \
-              examples/slack_reply_envelope.json
-          } > "$sums"
-
-          # `sha256sum` on Linux, `shasum -a 256` elsewhere: the same script is
-          # run against a fresh local clone before it is trusted here, and a
-          # developer machine may have only the second.
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum -c "$sums"
-          else
-            shasum -a 256 -c "$sums"
-          fi
-
-          # 3. The size pins, including bodySize 427 — the number the golden
-          #    envelope's own credentialSubject.communication.bodySize claims.
-          #    That the envelope's bodySha256 EQUALS the body digest above is
-          #    asserted in Elixir, against both sides recomputed at runtime,
-          #    by the library's corpus test; `mix test` below runs it.
-          check_size() {
-            actual="$(wc -c < "$1" | tr -d ' ')"
-            if [ "$actual" != "$2" ]; then
-              echo "::error::$1 is $actual bytes, recorded as $2"
-              exit 1
-            fi
-            printf 'ok  %-45s %s bytes\n' "$1" "$actual"
-          }
-          check_size examples/principal_signed_envelope.json 3382
-          check_size examples/principal_signed_body.txt 427
-          check_size examples/slack_reply_envelope.json 2148
 
       # ----------------------------------------------------------------------
       # The Node-free claim, proven rather than asserted.
@@ -249,6 +183,70 @@ jobs:
 
       - name: library — deps.get
         run: mix deps.get
+
+      # The drift gate moved here, after deps.get, when the sibling checkout went
+      # away: the fixtures now arrive inside the `:aph` dependency, so there is
+      # nothing to check until Mix has fetched it. That costs the seconds-fast
+      # failure the old placement bought, and buys back a stronger claim — it now
+      # verifies the bytes the build ACTUALLY resolved, not a second checkout that
+      # merely shared its SHA.
+      - name: Fixture drift gate (PRD-001 gate 6)
+        working-directory: jido_aph/deps/aph
+        run: |
+          set -euo pipefail
+
+          # 1. The checkout really is the pin. `actions/checkout` was ASKED for
+          #    it above; this asserts what landed on disk.
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$APH_PIN" ]; then
+            echo "::error::aph checkout is $head, expected the pin $APH_PIN"
+            exit 1
+          fi
+          echo "aph HEAD  $head"
+
+          # 2. The golden bytes are the recorded bytes. These three digests
+          #    were recomputed from the pinned checkout, never copied from any
+          #    README's prose — upstream's body-binding summary is stale, which
+          #    is exactly what the T2 governance erratum reports.
+          sums="$RUNNER_TEMP/aph-fixtures.sha256"
+          {
+            printf '%s  %s\n' \
+              8a6015d873786b533fa00f16b3f789a7984be61d631d5cd9e3515f7c5e721466 \
+              examples/principal_signed_envelope.json
+            printf '%s  %s\n' \
+              dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb \
+              examples/principal_signed_body.txt
+            printf '%s  %s\n' \
+              b8ffb64d42682db4406cc0c25d4c15f52c23eaff7da456aad5d82c6fb71a3640 \
+              examples/slack_reply_envelope.json
+          } > "$sums"
+
+          # `sha256sum` on Linux, `shasum -a 256` elsewhere: the same script is
+          # run against a fresh local clone before it is trusted here, and a
+          # developer machine may have only the second.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "$sums"
+          else
+            shasum -a 256 -c "$sums"
+          fi
+
+          # 3. The size pins, including bodySize 427 — the number the golden
+          #    envelope's own credentialSubject.communication.bodySize claims.
+          #    That the envelope's bodySha256 EQUALS the body digest above is
+          #    asserted in Elixir, against both sides recomputed at runtime,
+          #    by the library's corpus test; `mix test` below runs it.
+          check_size() {
+            actual="$(wc -c < "$1" | tr -d ' ')"
+            if [ "$actual" != "$2" ]; then
+              echo "::error::$1 is $actual bytes, recorded as $2"
+              exit 1
+            fi
+            printf 'ok  %-45s %s bytes\n' "$1" "$actual"
+          }
+          check_size examples/principal_signed_envelope.json 3382
+          check_size examples/principal_signed_body.txt 427
+          check_size examples/slack_reply_envelope.json 2148
+
       - name: library — hex.audit
         run: mix hex.audit
       - name: library — format --check-formatted
@@ -384,14 +382,6 @@ jobs:
         with:
           path: jido_aph
 
-      - name: Check out the sibling aph clone at the pinned SHA
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.APH_REPO }}
-          ref: ${{ env.APH_PIN }}
-          path: aph
-          persist-credentials: false
-
       # Deliberately duplicated from the core job rather than shared. This job
       # has no `needs:` — that is the whole design — so nothing guarantees the
       # core job ran, let alone passed, before this one narrates the golden's
@@ -400,8 +390,42 @@ jobs:
       # support YAML anchors, so the sharing that would remove the duplication
       # is not available; a shared script would be a new file this card does
       # not own.)
+      - name: Install Erlang/OTP and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29.0.5"
+          elixir-version: "1.20.3-otp-29"
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Record the toolchain this run actually used
+        run: |
+          set -euo pipefail
+          elixir --version
+          node --version
+          cargo --version
+
+      - name: demo — deps.get
+        working-directory: jido_aph/demo
+        run: mix deps.get
+
+      # Only the demo. The library has no `:deep`-tagged tests and owns no
+      # sidecar: `JidoAph.DeepVerifier` is a behaviour with no in-library
+      # implementation, which is the seam PRD-001 §7.1 is built around. The
+      # library's suite is the core job's business.
+      #
+      # Included-but-unavailable is a failure here, never a silent pass: the
+      # deep suite's first test asserts `TsSidecar.availability/0` and prints
+      # that function's setup story when it is not `:ok`. So this step also
+      # proves the npm build above actually produced a usable dist/.
+      # Everything below waits on the deps.get above, which is what now brings
+      # the aph repository onto disk: the fixtures this job verifies and the
+      # TypeScript source it builds both live inside the `:aph` dependency, so
+      # neither existed at checkout time the way a sibling clone once did.
+
       - name: Fixture drift gate (this job stands alone)
-        working-directory: aph
+        working-directory: jido_aph/deps/aph
         run: |
           set -euo pipefail
           head="$(git rev-parse HEAD)"
@@ -452,7 +476,7 @@ jobs:
       # run without a lockfile, so it would fail on a fresh checkout every
       # time.
       - name: Install the TypeScript compiler (the only dependency)
-        working-directory: aph/interpreters/typescript
+        working-directory: jido_aph/demo/deps/aph/interpreters/typescript
         run: npm install --no-audit --no-fund
 
       # dist/ is gitignored upstream, so it exists here only because this step
@@ -460,38 +484,9 @@ jobs:
       # deep transcript's own banner says it cannot establish on a developer
       # machine and hands to CI.
       - name: Build dist/ from source at the pinned SHA
-        working-directory: aph/interpreters/typescript
+        working-directory: jido_aph/demo/deps/aph/interpreters/typescript
         run: npm run build
 
-      - name: Install Erlang/OTP and Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          otp-version: "29.0.5"
-          elixir-version: "1.20.3-otp-29"
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Record the toolchain this run actually used
-        run: |
-          set -euo pipefail
-          elixir --version
-          node --version
-          cargo --version
-
-      - name: demo — deps.get
-        working-directory: jido_aph/demo
-        run: mix deps.get
-
-      # Only the demo. The library has no `:deep`-tagged tests and owns no
-      # sidecar: `JidoAph.DeepVerifier` is a behaviour with no in-library
-      # implementation, which is the seam PRD-001 §7.1 is built around. The
-      # library's suite is the core job's business.
-      #
-      # Included-but-unavailable is a failure here, never a silent pass: the
-      # deep suite's first test asserts `TsSidecar.availability/0` and prints
-      # that function's setup story when it is not `:ok`. So this step also
-      # proves the npm build above actually produced a usable dist/.
       - name: demo — the :deep-tagged suite
         working-directory: jido_aph/demo
         run: mix test --include deep

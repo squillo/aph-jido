@@ -13,11 +13,12 @@ not do.
 [1] PROVENANCE — the bytes, and the verifier that ruled on them
 ------------------------------------------------------------------------------
 Nothing here is vendored: neither the fixtures nor the verifier. Both are
-read at runtime from a sibling clone of the aph repo (PRD-001 D5/D7), so the
-SHA below is what attributes every verdict in this transcript to bytes a
-reader can fetch and re-run for themselves.
+read at runtime from one aph checkout (PRD-001 D5/D7) — by default the
+pinned `:aph` dependency, which carries examples/ and interpreters/
+typescript/ alike. The SHA below is what attributes every verdict in this
+transcript to bytes a reader can fetch and re-run for themselves.
 
-  corpus + verifier     one sibling aph clone, resolved at runtime
+  corpus + verifier     one aph checkout, resolved at runtime
   aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
   aph worktree          clean at HEAD
   aph typescript/       source clean at HEAD
@@ -185,13 +186,13 @@ One key handed in out of band, one that needs none, and zero fetched.
 The same bytes, the same key, the same everything — with `now` read from this
 machine's clock instead of pinned.
 
-  now                   2026-08-27T19:58:25.990272Z   <- varies every run
+  now                   2026-08-28T02:47:15.136804Z   <- varies every run
   envelope window       2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
 
   outcome               REFUSED on the validity window
   code                  APH_E003
   the verifier's own words, verbatim:
-      APH_E003 (MandateExpired): evaluated at 2026-08-27T19:58:25.990272Z,
+      APH_E003 (MandateExpired): evaluated at 2026-08-28T02:47:15.136804Z,
       outside the envelope window 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
 
   Read that as the good news it is. The golden's window closed on
