@@ -27,6 +27,14 @@ defmodule JidoAph.Guard do
      because the mode gate alone admits a forged PrincipalSigned label
      (§7.1.11; `APH_E013`).
 
+  After those four — and only after — the gate decodes the NORMALIZED
+  document `step 2` returned, via `JidoAph.Envelope.from_normalized/1`, so
+  the admit context can report what the envelope says about itself. That
+  decode is **not a fifth gate step**: it applies no rule, it can admit
+  nothing the four ops refused, and it runs on bytes `serde_json` already
+  adjudicated rather than on the wire bytes. See `JidoAph.Envelope` for why
+  the distinction between the two is the whole reason that module exists.
+
   ## What a pass means — and what it does not
 
   An admitted signal is **"notarization-shaped"** and, when a mode policy is
@@ -146,22 +154,53 @@ defmodule JidoAph.Guard do
   policy; the deep leg is full offline §8.3 (one out-of-band notary key,
   stated); the third column is stated, not implied.
 
+  The table above is a table of CHECKS, and adding `:claims` to the admit
+  context below added no row to it: the four field values it carries are
+  READ from the document and compared against nothing. In particular
+  `channel_kind` is not the closed-vocabulary row (still "no"), and
+  `human_principal_did` is not the signatures row (still "no").
+
   ## Runtime context on admit
 
   An admitted signal contributes one runtime-context key, `:aph`, carrying
   the fixed verdict wording, the mode the proof STRUCTURE supports (from
-  step 4), the configured mode policy, and the depth the gate RAN:
+  step 4), the configured mode policy, the depth the gate RAN, and — under
+  a separate `:claims` key — four fields read out of the envelope:
 
       %{aph: %{verdict: "notarization-shaped, mode policy satisfied (PrincipalSigned)",
                structure_mode: "PrincipalSigned",
                require_mode: "PrincipalSigned",
-               depth: :structural}}
+               depth: :structural,
+               claims: %{envelope_id: "urn:uuid:...",
+                         human_principal_did: "did:key:...",
+                         agent_did: "did:web:...",
+                         channel_kind: "slack"}}}
 
   With no mode policy configured the verdict is `"notarization-shaped"`
   alone — the guard never claims a policy it was not asked to enforce.
   `:depth` is always `:structural` in v1 — it states what this gate DID,
   never what the config declared, so a `depth: :deep` deployment cannot
   read an unearned deep-verification claim out of the gate's own context.
+
+  `:claims` is a separate key, and the separation is the label. Everything
+  under it is **the envelope's own UNVERIFIED claim about itself**: a string
+  lifted out of a document whose signatures nothing on this rail checked.
+  `human_principal_did` does not mean that human authorized anything;
+  `agent_did` is unauthenticated even in a fully signature-verified envelope
+  (§7.1.11 gives the agent no proof role at all); `channel_kind` was not
+  compared against any delivery context; `envelope_id` was not checked
+  against anything previously seen. A value may be `nil` when the document
+  omits the field — absent, never defaulted.
+
+  It is surfaced anyway, and deliberately, because the alternative shipped
+  for a while and was worse: with the guard silent about who the envelope
+  names, an implementer who wants the principal's DID digs it out of the
+  signal or re-parses the envelope at the Action and labels the result
+  nothing at all. A labelled claim in the receiver's own runtime context is
+  the honest version of a fact implementers were going to obtain regardless.
+  Later checks that BIND against these fields would report themselves
+  separately, because "this is what the envelope said" and "this is what we
+  compared it to" are different sentences.
   """
 
   # The per-agent config surface, validated at agent compile time (the
@@ -191,6 +230,8 @@ defmodule JidoAph.Guard do
     config_schema: @config_schema
 
   require Logger
+
+  alias JidoAph.Envelope
 
   @doc """
   The §7.1.7.1 envelope byte bound enforced before any parse.
@@ -331,12 +372,19 @@ defmodule JidoAph.Guard do
   end
 
   defp gate(signal, envelope_json, require_mode) do
+    # `normalized` is APH.parse_envelope_json/1's OUTPUT, and it is the only
+    # thing Envelope.from_normalized/1 is ever handed. Passing `envelope_json`
+    # there instead would put a second parser on the trust path — see
+    # JidoAph.Envelope's moduledoc for what that would cost, and
+    # test/jido_aph/envelope_test.exs for the pin that keeps this call site
+    # honest.
     with :ok <- check_size(envelope_json),
          :ok <- check_text(envelope_json),
-         {:ok, _normalized} <- APH.parse_envelope_json(envelope_json),
+         {:ok, normalized} <- APH.parse_envelope_json(envelope_json),
          :ok <- check_mode(envelope_json, require_mode),
-         {:ok, structure_mode} <- APH.verify_proof_structure(envelope_json) do
-      admit(signal, structure_mode, require_mode)
+         {:ok, structure_mode} <- APH.verify_proof_structure(envelope_json),
+         {:ok, envelope} <- Envelope.from_normalized(normalized) do
+      admit(signal, envelope, structure_mode, require_mode)
     else
       {:error, reason} -> refuse(signal, reason)
     end
@@ -381,7 +429,7 @@ defmodule JidoAph.Guard do
   defp check_mode(envelope_json, require_mode),
     do: APH.require_attestation_mode(envelope_json, require_mode)
 
-  defp admit(signal, structure_mode, require_mode) do
+  defp admit(signal, envelope, structure_mode, require_mode) do
     verdict =
       case require_mode do
         nil -> "notarization-shaped"
@@ -398,9 +446,24 @@ defmodule JidoAph.Guard do
          verdict: verdict,
          structure_mode: structure_mode,
          require_mode: require_mode,
-         depth: :structural
+         depth: :structural,
+         claims: claims(envelope)
        }
      }}
+  end
+
+  # The envelope's own UNVERIFIED claims about itself, kept under their own
+  # key so the shape carries the label rather than only the moduledoc. Nothing
+  # here was compared against anything: not against a clock, not against a
+  # delivery context, not against a key, not against anything previously seen.
+  # A nil means the document omitted the field.
+  defp claims(envelope) do
+    %{
+      envelope_id: Envelope.id(envelope),
+      human_principal_did: Envelope.human_principal_did(envelope),
+      agent_did: Envelope.agent_did(envelope),
+      channel_kind: Envelope.channel_kind(envelope)
+    }
   end
 
   defp refuse(signal, reason) do

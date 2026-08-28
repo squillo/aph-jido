@@ -368,6 +368,8 @@ defmodule Demo.Narrative do
     do: [kv("context.aph", "ABSENT — the routed action never reported")]
 
   defp context_facts(ctx) do
+    claims = Map.get(ctx, :claims) || %{}
+
     [
       "  context.aph, as the routed action received it:",
       "      verdict",
@@ -375,13 +377,29 @@ defmodule Demo.Narrative do
       "      structure_mode  " <> inspect(Map.get(ctx, :structure_mode)),
       "      require_mode    " <> inspect(Map.get(ctx, :require_mode)),
       "      depth           " <> inspect(Map.get(ctx, :depth)),
+      "      claims          the envelope's own UNVERIFIED claims,",
+      "                      read after the gate, compared against nothing:",
+      "          envelope_id         " <> inspect(Map.get(claims, :envelope_id)),
+      "          human_principal_did",
+      "              " <> inspect(Map.get(claims, :human_principal_did)),
+      "          agent_did           " <> inspect(Map.get(claims, :agent_did)),
+      "          channel_kind        " <> inspect(Map.get(claims, :channel_kind)),
       "",
       "  `structure_mode` is the mode the proof STRUCTURE supports; `require_mode`",
       "  is the policy that was configured. They agree here, and the guard reports",
       "  them separately on purpose — a verdict that conflated them would be",
       "  claiming the envelope PROVED the policy rather than merely matching it.",
       "  `depth: :structural` states what this gate RAN, never what a config",
-      "  declared."
+      "  declared.",
+      "",
+      "  `claims` is what the DOCUMENT asserts about itself, decoded from the",
+      "  bytes aph-ex normalized and compared against nothing at all: no clock,",
+      "  no delivery context, no key, nothing previously seen. N1-N6 below hold",
+      "  over every one of these four strings. They are reported anyway, and",
+      "  under their own key, because the alternative shipped for a while and",
+      "  was worse — with the guard silent about who the envelope names, an",
+      "  action that wants the principal's DID digs it out of the signal and",
+      "  labels it nothing."
     ]
   end
 

@@ -100,6 +100,12 @@ story: key discovery, revocation transport, and any contact with a live notary
 happen **nowhere in this repository**, and no output anywhere implies
 otherwise.
 
+This is a table of **checks**, and the `claims` map the guard now hands the
+routed Action added no row to it. Those four field values are READ from the
+document and compared against nothing: `channel_kind` is not the
+closed-vocabulary row (still "no"), and `human_principal_did` is not the
+signatures row (still "no").
+
 ---
 
 ## Setup
@@ -264,12 +270,27 @@ reads as `context.aph`:
 %{aph: %{verdict: "notarization-shaped, mode policy satisfied (PrincipalSigned)",
          structure_mode: "PrincipalSigned",
          require_mode: "PrincipalSigned",
-         depth: :structural}}
+         depth: :structural,
+         claims: %{envelope_id: "urn:uuid:00000000-0000-4000-8000-0000000000f3",
+                   human_principal_did: "did:key:z6Mkia…",
+                   agent_did: "did:web:agent.squillo.com",
+                   channel_kind: "slack"}}}
 ```
 
 With no mode policy configured the verdict is `"notarization-shaped"` alone —
 the guard never names a policy nobody asked it to enforce. `:depth` reports
 what the gate **ran**, never what the config declared.
+
+`:claims` is a separate key and the separation is the label: everything under
+it is **the envelope's own unverified claim about itself**, read out of the
+document after the gate and compared against nothing — no clock, no delivery
+context, no key, nothing previously seen. N1–N6 below hold over every one of
+those four strings. `human_principal_did` does not mean that human authorized
+anything, and `agent_did` is unauthenticated even in a fully signature-checked
+envelope, because §7.1.11 gives the agent no proof role at all. It is surfaced
+anyway, and deliberately: with the guard silent about who the envelope names,
+an implementer who wants the principal's DID digs it out of the signal and
+labels it nothing.
 
 Refusals return `{:error, reason}` with aph-ex's own message passed through
 byte-untouched. Through a live agent they arrive at the
@@ -277,6 +298,18 @@ byte-untouched. Through a live agent they arrive at the
 `%Jido.Error.ExecutionError{message: "Plugin prepare_signal failed", details:
 %{plugin: JidoAph.Guard, reason: reason}}` — **match on `details.reason`**, not
 on the message, which is a fixed framework string.
+
+**`JidoAph.Envelope`** — read-only field access over an envelope aph-ex has
+already admitted, and the one place a second JSON parser is allowed to run.
+Its only constructor, `from_normalized/1`, takes `APH.parse_envelope_json/1`'s
+**normalized output** — never the wire bytes — so `serde_json` stays the sole
+adjudicator of unknown fields, duplicate keys, and the untagged `proof` union.
+Accessors (`id/1`, `valid_until/1`, `human_principal_did/1`, `agent_did/1`,
+`channel_kind/1`, `recipient_addressing/2`, `content_class/1`,
+`body_sha256/1`, `attestation_mode/1`, …) return the document's own value, or
+`nil` when the field is absent — and a check built on one of them must read
+that `nil` as a refusal, never as a pass. Nothing here verifies anything; it
+decodes with stdlib `JSON` (Elixir ≥ 1.18), so no dependency was added.
 
 **`JidoAph.Signal.Ext.Notarization`** — the registered `Jido.Signal.Ext` that
 carries the envelope, with `JidoAph.attach_notarization/3` and
@@ -525,6 +558,7 @@ evidence of anything.
 lib/jido_aph.ex                              attach/read helpers
 lib/jido_aph/signal/ext/notarization.ex      the two single-constant identifiers
 lib/jido_aph/guard.ex                        the four-step structural gate
+lib/jido_aph/envelope.ex                     read-only fields, normalized output only
 lib/jido_aph/deep_verifier.ex                behaviour only — the seam
 test/jido_pins/                              jido 2.3.3 contracts, pinned by test
 test/support/corpus.ex                       runtime corpus resolution (dep, APH_PATH, config)
@@ -687,6 +721,13 @@ about this run: nothing here was minted, and no human authorized anything.
       structure_mode  "PrincipalSigned"
       require_mode    "PrincipalSigned"
       depth           :structural
+      claims          the envelope's own UNVERIFIED claims,
+                      read after the gate, compared against nothing:
+          envelope_id         "urn:uuid:00000000-0000-4000-8000-0000000000f3"
+          human_principal_did
+              "did:key:z6MkiaMbhXHNA4eJVCCj8dbzKzTgYDKf6crKgHVHid1F1WCT"
+          agent_did           "did:web:agent.squillo.com"
+          channel_kind        "slack"
 
   `structure_mode` is the mode the proof STRUCTURE supports; `require_mode`
   is the policy that was configured. They agree here, and the guard reports
@@ -694,6 +735,15 @@ about this run: nothing here was minted, and no human authorized anything.
   claiming the envelope PROVED the policy rather than merely matching it.
   `depth: :structural` states what this gate RAN, never what a config
   declared.
+
+  `claims` is what the DOCUMENT asserts about itself, decoded from the
+  bytes aph-ex normalized and compared against nothing at all: no clock,
+  no delivery context, no key, nothing previously seen. N1-N6 below hold
+  over every one of these four strings. They are reported anyway, and
+  under their own key, because the alternative shipped for a while and
+  was worse — with the guard silent about who the envelope names, an
+  action that wants the principal's DID digs it out of the signal and
+  labels it nothing.
 
   cross-check           APH.verify_proof_structure/1 on the same bytes
                         returns this identical result, byte for byte:

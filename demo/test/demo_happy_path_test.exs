@@ -71,6 +71,35 @@ defmodule Demo.HappyPathTest do
     assert log =~ "would deliver (no channel adapter)"
   end
 
+  # Why this test exists: the library pins the `:claims` map by calling
+  # prepare_signal/2 directly; this pins that it survives the REAL path —
+  # merged into the runtime context by jido's AgentServer, carried through
+  # routing, and handed to the action that runs. Before this, an admitted
+  # signal reached DeliverReply with no idea who the envelope named, which is
+  # what pushes an implementer to dig the principal out of the signal and
+  # label it nothing. It also pins the honesty half: these are the ENVELOPE's
+  # claims, so they sit under their own key and the verdict wording is
+  # unchanged by their presence, and the display name is deliberately absent.
+  test "the envelope's own unverified claims reach DeliverReply under context.aph.claims" do
+    envelope = Demo.Corpus.example!("principal_signed_envelope.json")
+    subject = get_in(JSON.decode!(envelope), ["credentialSubject"])
+
+    run_happy_path!()
+
+    assert_receive {:deliver_reply_ran, _params, context}
+
+    assert context.aph.claims == %{
+             envelope_id: JSON.decode!(envelope)["id"],
+             human_principal_did: subject["humanPrincipal"]["id"],
+             agent_did: subject["agent"]["id"],
+             channel_kind: subject["channel"]["kind"]
+           }
+
+    assert context.aph.claims.channel_kind == "slack"
+    assert context.aph.verdict == @verdict
+    refute inspect(context.aph.claims) =~ subject["humanPrincipal"]["displayName"]
+  end
+
   # Why this test exists: PRD-001 §8 makes it a hard rule that the guard's
   # output never contains the bare words "verified" or "signed" — an aph-ex
   # structure pass "says NOTHING about whether any signature verifies", so

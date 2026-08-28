@@ -119,6 +119,13 @@ about this run: nothing here was minted, and no human authorized anything.
       structure_mode  "PrincipalSigned"
       require_mode    "PrincipalSigned"
       depth           :structural
+      claims          the envelope's own UNVERIFIED claims,
+                      read after the gate, compared against nothing:
+          envelope_id         "urn:uuid:00000000-0000-4000-8000-0000000000f3"
+          human_principal_did
+              "did:key:z6MkiaMbhXHNA4eJVCCj8dbzKzTgYDKf6crKgHVHid1F1WCT"
+          agent_did           "did:web:agent.squillo.com"
+          channel_kind        "slack"
 
   `structure_mode` is the mode the proof STRUCTURE supports; `require_mode`
   is the policy that was configured. They agree here, and the guard reports
@@ -126,6 +133,15 @@ about this run: nothing here was minted, and no human authorized anything.
   claiming the envelope PROVED the policy rather than merely matching it.
   `depth: :structural` states what this gate RAN, never what a config
   declared.
+
+  `claims` is what the DOCUMENT asserts about itself, decoded from the
+  bytes aph-ex normalized and compared against nothing at all: no clock,
+  no delivery context, no key, nothing previously seen. N1-N6 below hold
+  over every one of these four strings. They are reported anyway, and
+  under their own key, because the alternative shipped for a while and
+  was worse — with the guard silent about who the envelope names, an
+  action that wants the principal's DID digs it out of the signal and
+  labels it nothing.
 
   cross-check           APH.verify_proof_structure/1 on the same bytes
                         returns this identical result, byte for byte:

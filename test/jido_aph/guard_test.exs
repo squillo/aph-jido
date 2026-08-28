@@ -62,6 +62,86 @@ defmodule JidoAph.GuardTest do
     refute aph.verdict =~ ~r/\b(verified|signed)\b/
   end
 
+  # Why: the guard used to bind `{:ok, _normalized}` from the parse and throw
+  # it away, so an admitted signal reached its Action with no idea WHO the
+  # envelope named — pushing an implementer to dig the principal out of the
+  # signal and label it nothing. This pins the four claims now surfaced, each
+  # against the value read from the fixture at runtime rather than a
+  # remembered constant, and pins that they live under their own `:claims`
+  # key: the separation is the label, and a later binding check reporting what
+  # it COMPARED must not be confusable with what the envelope merely SAID.
+  test "an admitted envelope's own claims reach the action under :claims" do
+    envelope_json = golden()
+    {:ok, normalized} = APH.parse_envelope_json(envelope_json)
+    decoded = JSON.decode!(normalized)
+    subject = decoded["credentialSubject"]
+
+    assert {:ok, _signal, %{aph: aph}} =
+             Guard.prepare_signal(signal_with(envelope_json), ctx(@principal_signed_config))
+
+    assert aph.claims == %{
+             envelope_id: decoded["id"],
+             human_principal_did: subject["humanPrincipal"]["id"],
+             agent_did: subject["agent"]["id"],
+             channel_kind: subject["channel"]["kind"]
+           }
+
+    # Not vacuous: these are the golden's real values.
+    assert aph.claims.envelope_id == "urn:uuid:00000000-0000-4000-8000-0000000000f3"
+    assert aph.claims.channel_kind == "slack"
+    assert aph.claims.agent_did =~ "did:web:"
+    assert aph.claims.human_principal_did =~ "did:key:"
+
+    # The verdict is unchanged by the claims: surfacing what a document says
+    # is not a check, and the wording that states what the gate DID must not
+    # drift because the gate now also reports what it READ.
+    assert aph.verdict == "notarization-shaped, mode policy satisfied (PrincipalSigned)"
+    assert aph.depth == :structural
+
+    # displayName is deliberately NOT surfaced — it is the field most likely
+    # to be rendered straight into a UI next to an admitted action, and the
+    # accessor exists for a caller that has decided how to label it.
+    refute Map.has_key?(aph.claims, :human_principal_display_name)
+    refute inspect(aph) =~ "Scott Wyatt"
+  end
+
+  # Why: a claims map assembled from one fixture would pass the test above
+  # while being hardcoded. This runs a DIFFERENT golden — a NotaryAttested
+  # envelope on a different channel with a different principal — through the
+  # same gate with no mode policy, and pins that every claim moved with the
+  # document.
+  test "the claims come from the envelope in hand, not from one fixture" do
+    discord = Corpus.example!("discord_dm_envelope.json")
+
+    assert {:ok, _signal, %{aph: aph}} =
+             Guard.prepare_signal(signal_with(discord), ctx(%{required: true}))
+
+    assert aph.structure_mode == "NotaryAttested"
+    assert aph.claims.channel_kind == "discord"
+    assert aph.claims.envelope_id == "urn:uuid:00000000-0000-4000-8000-000000000003"
+
+    golden_claims =
+      Guard.prepare_signal(signal_with(golden()), ctx(@principal_signed_config))
+      |> then(fn {:ok, _signal, %{aph: aph}} -> aph.claims end)
+
+    refute aph.claims.envelope_id == golden_claims.envelope_id
+    refute aph.claims.channel_kind == golden_claims.channel_kind
+    refute aph.claims.human_principal_did == golden_claims.human_principal_did
+  end
+
+  # Why: a refused envelope must contribute NOTHING — the four-op gate decides
+  # admission, and the decode that produces the claims runs only after it. If
+  # the decode ever moved ahead of the gate, a refusal could start carrying a
+  # claims map read out of a document aph-ex rejected, and a caller matching
+  # on `{:error, reason}` would suddenly have attacker-chosen strings in
+  # scope. Pins the refusal shape stays a bare 2-tuple on the forged label.
+  test "a refused envelope contributes no claims at all" do
+    assert {:error, reason} =
+             Guard.prepare_signal(signal_with(forged_label()), ctx(@principal_signed_config))
+
+    assert is_binary(reason)
+  end
+
   # Why: spec §7.1.7.1 — canonicalization happens on unauthenticated input,
   # so the byte bound must be enforced BEFORE any parse. This test pins
   # ATTRIBUTION, not ordering: golden bytes padded with trailing whitespace
