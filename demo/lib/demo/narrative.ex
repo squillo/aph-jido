@@ -52,19 +52,20 @@ defmodule Demo.Narrative do
   @verdict "notarization-shaped, mode policy satisfied (PrincipalSigned)"
 
   # The four gate steps, in the order JidoAph.Guard runs them.
-  @step_order [:s1, :s2, :s3, :s4]
+  @step_order [:s1, :s2, :s3, :s4, :s5]
 
   @step_labels %{
     s1: "S1  §7.1.7.1",
     s2: "S2  §8.3 step 1",
     s3: "S3  §8.3.1 step 1a",
-    s4: "S4  §7.1.11"
+    s4: "S4  §7.1.11",
+    s5: "S5  §8.3 step 6"
   }
 
   # The never-run list, PRD-001 §3 step 2's "and which did NOT". Rendered in
   # full in the honesty footer, referenced by tag on every leg.
-  @never_run_line_1 "N1 signatures     N2 key discovery   N3 validity window"
-  @never_run_line_2 "N4 revocation     N5 bodySha256      N6 closed vocabulary"
+  @never_run_line_1 "N1 signatures     N2 key discovery   N3 revocation"
+  @never_run_line_2 "N4 bodySha256     N5 closed vocab    N6 live notary"
 
   # aph-ex's own warning about the op this gate leans on hardest, quoted from
   # ../aph/interpreters/elixir/lib/aph.ex (the @doc on verify_proof_structure/1)
@@ -203,6 +204,17 @@ defmodule Demo.Narrative do
         kv("aph worktree", worktree),
         kv("aph examples/", examples),
         "",
+        kv("clock (S5 judges", Demo.Corpus.pinned_now() <> "  — PINNED"),
+        kv("the window against)", ""),
+        "",
+        "  The clock is pinned, and saying so is the point. The golden's window is",
+        "  #{env["validFrom"]} .. #{env["validUntil"]}, which has passed — as has",
+        "  every published example's. Against the wall clock the gate refuses this",
+        "  fixture at S5, correctly, and there would be no happy path to show. The",
+        "  demo pins an instant INSIDE the window rather than switching the check",
+        "  off, because a demo that disabled the gate to reach a green result would",
+        "  be demonstrating a configuration nobody should ship.",
+        "",
         "  That SHA is READ from the checkout, not asserted against a pin. mix.exs",
         "  does pin the dependency by ref, but this banner reports what it FOUND —",
         "  an APH_PATH working tree would print its own SHA here. Failing the build",
@@ -301,15 +313,19 @@ defmodule Demo.Narrative do
         "S4  §7.1.11         APH.verify_proof_structure/1 — ALWAYS, even with",
         "                    no mode policy, because S3 alone admits a forged",
         "                    label (APH_E013)",
+        "S5  §8.3 step 6     the validity window, 60s skew, against the clock",
+        "                    named in the banner. A DateTime comparison, not a",
+        "                    cipher — which is why its absence until 2026-08-28",
+        "                    was never covered by \"no cryptography on the BEAM\"",
         "",
         "And the six things no leg below runs, at any depth, ever:",
         "",
         "N1  Ed25519 signatures over JCS/RFC 8785 (§8.3)",
         "N2  key discovery — DNS TXT / did:web (§8.4)",
-        "N3  validity window (60s skew)",
-        "N4  revocation / credentialStatus",
-        "N5  bodySha256 over the received bytes (§8.3 step 8, APH_E009)",
-        "N6  closed channel / contentClass vocabulary (§7.1.5 / §7.1.6)",
+        "N3  revocation / credentialStatus",
+        "N4  bodySha256 over the received bytes (§8.3 step 8, APH_E009)",
+        "N5  closed channel / contentClass vocabulary (§7.1.5 / §7.1.6)",
+        "N6  the live notary — never contacted, by anything, at any point",
         "",
         "Each leg names, from what actually happened, which of S1-S4 RAN, which one",
         "REFUSED, and which were NEVER REACHED. N1-N6 are constant: they are what",
@@ -722,20 +738,25 @@ defmodule Demo.Narrative do
         "  N2  No key was discovered or resolved: no DNS TXT lookup, no did:web",
         "      fetch, no did:key decode. Nothing on this rail resolves anything",
         "      (§8.4).",
-        "  N3  The validity window was never compared against any clock. The golden",
-        "      declares #{env["validFrom"]} .. #{env["validUntil"]} and no leg",
-        "      above read it.",
-        "  N4  Revocation was never consulted. The golden carries no",
+        "  N3  Revocation was never consulted. The golden carries no",
         "      credentialStatus, and no status transport exists in this repo.",
-        "  N5  bodySha256 was never recomputed over the #{byte_size(corpus.body)} received bytes. The",
+        "  N4  bodySha256 was never recomputed over the #{byte_size(corpus.body)} received bytes. The",
         "      digest quoted in the banner",
         "      (#{communication["bodySha256"]})",
         "      is the envelope's own claim (§8.3 step 8, APH_E009).",
-        "  N6  The closed channel and contentClass vocabularies were never enforced.",
+        "  N5  The closed channel and contentClass vocabularies were never enforced.",
         "      aph-ex exposes no such op (§7.1.5 / §7.1.6).",
+        "  N6  The live notary at did:web:aph-notary.squillo.com was not contacted,",
+        "      by anything, at any point. Nothing above reached the network at all.",
         "",
-        "  The live notary at did:web:aph-notary.squillo.com was not contacted, by",
-        "  anything, at any point. Nothing above reached the network at all.",
+        "  The validity window IS checked, and used not to be — which is why it is",
+        "  no longer on this list. Until 2026-08-28 the gate had no window check at",
+        "  all, and this demo's happy path admitted a golden that expired",
+        "  #{env["validUntil"]}. That check is now S5, it runs by default, and the",
+        "  clock it judges against is stated in the banner above rather than",
+        "  assumed. Every published example is past its own window today, so the",
+        "  demo pins the clock inside the golden's; against the wall clock this",
+        "  leg would refuse, and `mix demo.deep_verify` shows exactly that.",
         "",
         "aph-ex says it plainly of the one structural op this gate leans on hardest",
         "(../aph/interpreters/elixir/lib/aph.ex, verify_proof_structure/1):",

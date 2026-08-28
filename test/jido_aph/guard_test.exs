@@ -41,7 +41,19 @@ defmodule JidoAph.GuardTest do
 
   defp ctx(config), do: %{config: config}
 
-  @principal_signed_config %{required: true, require_mode: "PrincipalSigned"}
+  # The golden's window is 2026-05-21 -> 2026-05-22 and every published
+  # example is now past it, so a test that wants to reach the ADMIT path has
+  # to pin the clock inside the window. Pinned openly rather than by turning
+  # the check off: `check_window: false` would exercise a gate the shipped
+  # default does not use, and the whole reason this constant exists is that
+  # the window check was missing and nothing failed.
+  @pinned_now "2026-05-21T12:00:00Z"
+
+  @principal_signed_config %{
+    required: true,
+    require_mode: "PrincipalSigned",
+    clock: @pinned_now
+  }
 
   # Why: the happy path (PRD-001 §3 step 2). Pins the guard's entire admit
   # contract at once: the strict 3-tuple prepare_signal return the server
@@ -114,7 +126,10 @@ defmodule JidoAph.GuardTest do
     discord = Corpus.example!("discord_dm_envelope.json")
 
     assert {:ok, _signal, %{aph: aph}} =
-             Guard.prepare_signal(signal_with(discord), ctx(%{required: true}))
+             Guard.prepare_signal(
+               signal_with(discord),
+               ctx(%{required: true, clock: @pinned_now})
+             )
 
     assert aph.structure_mode == "NotaryAttested"
     assert aph.claims.channel_kind == "discord"
@@ -300,7 +315,7 @@ defmodule JidoAph.GuardTest do
   # configured (§8 honesty contract: claims graded to what each layer
   # earned).
   test "proof structure runs even with no mode policy; verdict claims no policy" do
-    no_mode_config = %{required: true}
+    no_mode_config = %{required: true, clock: @pinned_now}
 
     assert {:error, "APH_E013" <> _} =
              Guard.prepare_signal(signal_with(forged_label()), ctx(no_mode_config))
@@ -335,7 +350,63 @@ defmodule JidoAph.GuardTest do
     assert log =~ "notarization extension missing"
 
     # The default with no :required key is true — same refusal.
-    assert {:error, reason} = Guard.prepare_signal(bare_signal, ctx(%{}))
+    assert {:error, reason} = Guard.prepare_signal(bare_signal, ctx(%{clock: @pinned_now}))
     assert reason =~ "notarization extension missing"
+  end
+
+  # Why this test exists: it is the defect that started the pressure test.
+  # The guard shipped with NO validity-window check at all — `lib/` held not
+  # one reference to DateTime, validFrom or validUntil — so the demo's own
+  # happy path admitted a golden that expired 2026-05-22, and all twelve
+  # published examples are past their windows. This pins the refusal against
+  # the REAL system clock, deliberately using no pinned clock, so the test
+  # goes red again the day the check is removed or defaulted off.
+  test "the expired golden is refused against the system clock (§8.3 time window)" do
+    assert {:error, reason} =
+             Guard.prepare_signal(signal_with(golden()), ctx(%{require_mode: "PrincipalSigned"}))
+
+    assert reason =~ "window check"
+    assert reason =~ "expired"
+    # No borrowed code. APH_E003 is MandateExpired, scoped to a Communication
+    # or Delegation Mandate — not an envelope's own window against a clock —
+    # and miscitation is how a closed taxonomy stops meaning anything. The
+    # gap is filed upstream (aph RFC 0003 proposes APH_E019).
+    refute reason =~ "APH_E"
+  end
+
+  # Why this test exists: SQUILLO_BOOK ch.15 §202 — "A Security Guard Is Not
+  # Verified Until a Mutant of It Is Killed". The window comparison is one
+  # operator wide, and a `>` that should be `>=` (or a skew applied to the
+  # wrong side) is exactly the mutation line coverage cannot see. These four
+  # cells straddle the boundary at +/-1s around the 60s skew, so flipping the
+  # comparator or dropping the skew term kills at least one of them.
+  test "the skew boundary is pinned on both sides, at one-second resolution" do
+    # validUntil is 2026-05-22T00:00:00Z; skew is 60s.
+    admit = fn clock ->
+      match?(
+        {:ok, _, _},
+        Guard.prepare_signal(signal_with(golden()), ctx(%{clock: clock}))
+      )
+    end
+
+    assert admit.("2026-05-22T00:00:59Z"), "59s past validUntil is inside the 60s skew"
+    assert admit.("2026-05-22T00:01:00Z"), "exactly 60s past validUntil is still inside the skew"
+    refute admit.("2026-05-22T00:01:01Z"), "61s past validUntil is outside the skew"
+
+    # The not-yet-valid side, which a check written only for expiry misses.
+    refute admit.("2026-05-20T23:58:59Z"), "61s before validFrom is outside the skew"
+    assert admit.("2026-05-20T23:59:01Z"), "59s before validFrom is inside the skew"
+  end
+
+  # Why this test exists: a verifier that cannot establish its own clock
+  # cannot judge a window, and both verdicts it could invent are lies —
+  # SQUILLO_BOOK ch.15 §146, "a port that carries a decision has no safe
+  # default". Refusing is the only honest answer, so it is pinned.
+  test "an unusable :clock refuses rather than guessing a verdict" do
+    assert {:error, reason} =
+             Guard.prepare_signal(signal_with(golden()), ctx(%{clock: "not-an-instant"}))
+
+    assert reason =~ "window check"
+    assert reason =~ ":clock"
   end
 end

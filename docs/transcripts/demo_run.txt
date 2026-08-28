@@ -22,6 +22,17 @@ reader can fetch for themselves.
   aph worktree          clean at HEAD
   aph examples/         clean
 
+  clock (S5 judges      2026-05-21T12:00:00Z  — PINNED
+  the window against)   
+
+  The clock is pinned, and saying so is the point. The golden's window is
+  2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z, which has passed — as has
+  every published example's. Against the wall clock the gate refuses this
+  fixture at S5, correctly, and there would be no happy path to show. The
+  demo pins an instant INSIDE the window rather than switching the check
+  off, because a demo that disabled the gate to reach a green result would
+  be demonstrating a configuration nobody should ship.
+
   That SHA is READ from the checkout, not asserted against a pin. mix.exs
   does pin the dependency by ref, but this banner reports what it FOUND —
   an APH_PATH working tree would print its own SHA here. Failing the build
@@ -72,15 +83,19 @@ S3  §8.3.1 step 1a  APH.require_attestation_mode/2 — only when a mode
 S4  §7.1.11         APH.verify_proof_structure/1 — ALWAYS, even with
                     no mode policy, because S3 alone admits a forged
                     label (APH_E013)
+S5  §8.3 step 6     the validity window, 60s skew, against the clock
+                    named in the banner. A DateTime comparison, not a
+                    cipher — which is why its absence until 2026-08-28
+                    was never covered by "no cryptography on the BEAM"
 
 And the six things no leg below runs, at any depth, ever:
 
 N1  Ed25519 signatures over JCS/RFC 8785 (§8.3)
 N2  key discovery — DNS TXT / did:web (§8.4)
-N3  validity window (60s skew)
-N4  revocation / credentialStatus
-N5  bodySha256 over the received bytes (§8.3 step 8, APH_E009)
-N6  closed channel / contentClass vocabulary (§7.1.5 / §7.1.6)
+N3  revocation / credentialStatus
+N4  bodySha256 over the received bytes (§8.3 step 8, APH_E009)
+N5  closed channel / contentClass vocabulary (§7.1.5 / §7.1.6)
+N6  the live notary — never contacted, by anything, at any point
 
 Each leg names, from what actually happened, which of S1-S4 RAN, which one
 REFUSED, and which were NEVER REACHED. N1-N6 are constant: they are what
@@ -153,9 +168,10 @@ about this run: nothing here was minted, and no human authorized anything.
       S2  §8.3 step 1     RAN
       S3  §8.3.1 step 1a  RAN
       S4  §7.1.11         RAN
+      S5  §8.3 step 6     RAN
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 closed vocab    N6 live notary
 
 
 [4] LEG 2 — REFUSAL 1/6: no notarization extension, required: true
@@ -189,9 +205,10 @@ halves, the rejection and the log line, are visible in this block.
       S2  §8.3 step 1     NOT REACHED
       S3  §8.3.1 step 1a  NOT REACHED
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     NOT REACHED
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 closed vocab    N6 live notary
 
 
 [5] LEG 3 — REFUSAL 2/6: a forged PrincipalSigned label (APH_E013)
@@ -234,9 +251,10 @@ never edited (PRD-001 §10 gate 4).
       S2  §8.3 step 1     RAN
       S3  §8.3.1 step 1a  RAN
       S4  §7.1.11         REFUSED  <- the leg stops here
+      S5  §8.3 step 6     not attributable
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 closed vocab    N6 live notary
 
 
 [6] LEG 4 — REFUSAL 3/6: mode-absent vs a PrincipalSigned policy (APH_E012)
@@ -282,9 +300,10 @@ Its structure is sound, so the refusal is the mode policy and nothing else.
       S2  §8.3 step 1     RAN
       S3  §8.3.1 step 1a  REFUSED  <- the leg stops here
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     not attributable
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 closed vocab    N6 live notary
 
 
 [7] LEG 5 — REFUSAL 4/6: an unknown envelope field (strict parse, no code)
@@ -321,9 +340,10 @@ that never parsed reached no protocol rule and may cite none.
       S2  §8.3 step 1     REFUSED  <- the leg stops here
       S3  §8.3.1 step 1a  NOT REACHED
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     not attributable
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 closed vocab    N6 live notary
 
 
 [8] LEG 6 — REFUSAL 5/6: over the byte bound, refused before any parse
@@ -355,9 +375,10 @@ the strict parser ADMITS these very bytes.
       S2  §8.3 step 1     NOT REACHED
       S3  §8.3.1 step 1a  NOT REACHED
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     not attributable
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 closed vocab    N6 live notary
 
 
 [9] LEG 7 — ROW 6/6: a bare signal under required: false, delivered tagged
@@ -390,9 +411,10 @@ Delivery happens; it happens FLAGGED.
       S2  §8.3 step 1     NOT REACHED
       S3  §8.3.1 step 1a  NOT REACHED
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     NOT REACHED
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 closed vocab    N6 live notary
 
 
 [10] HONESTY FOOTER — what this run did not establish
@@ -412,20 +434,25 @@ included:
   N2  No key was discovered or resolved: no DNS TXT lookup, no did:web
       fetch, no did:key decode. Nothing on this rail resolves anything
       (§8.4).
-  N3  The validity window was never compared against any clock. The golden
-      declares 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z and no leg
-      above read it.
-  N4  Revocation was never consulted. The golden carries no
+  N3  Revocation was never consulted. The golden carries no
       credentialStatus, and no status transport exists in this repo.
-  N5  bodySha256 was never recomputed over the 427 received bytes. The
+  N4  bodySha256 was never recomputed over the 427 received bytes. The
       digest quoted in the banner
       (dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb)
       is the envelope's own claim (§8.3 step 8, APH_E009).
-  N6  The closed channel and contentClass vocabularies were never enforced.
+  N5  The closed channel and contentClass vocabularies were never enforced.
       aph-ex exposes no such op (§7.1.5 / §7.1.6).
+  N6  The live notary at did:web:aph-notary.squillo.com was not contacted,
+      by anything, at any point. Nothing above reached the network at all.
 
-  The live notary at did:web:aph-notary.squillo.com was not contacted, by
-  anything, at any point. Nothing above reached the network at all.
+  The validity window IS checked, and used not to be — which is why it is
+  no longer on this list. Until 2026-08-28 the gate had no window check at
+  all, and this demo's happy path admitted a golden that expired
+  2026-05-22T00:00:00Z. That check is now S5, it runs by default, and the
+  clock it judges against is stated in the banner above rather than
+  assumed. Every published example is past its own window today, so the
+  demo pins the clock inside the golden's; against the wall clock this
+  leg would refuse, and `mix demo.deep_verify` shows exactly that.
 
 aph-ex says it plainly of the one structural op this gate leans on hardest
 (../aph/interpreters/elixir/lib/aph.ex, verify_proof_structure/1):

@@ -41,9 +41,13 @@ defmodule JidoAph.Guard do
   configured, **"mode policy satisfied"**. That is the guard's entire claim.
   Per aph-ex, a structure pass "says NOTHING about whether any signature
   verifies" — this guard runs zero cryptography, checks no signatures, no
-  keys, no validity window, no bodySha256, no closed vocabulary, and no
-  revocation. Cryptographic depth belongs to a deep verifier outside this
-  gate.
+  keys, no bodySha256, no closed vocabulary, and no revocation.
+  Cryptographic depth belongs to a deep verifier outside this gate.
+
+  It DOES check the validity window (§8.3), because that is a `DateTime`
+  comparison rather than a cipher and the "no cryptography" line never
+  covered it. That check was missing until the day an expired golden was
+  found admitted on the demo's own happy path; see `check_window/2`.
 
   ## Refusal contract
 
@@ -126,6 +130,19 @@ defmodule JidoAph.Guard do
   - `:deep_verifier` (default `nil`) — a module implementing
     `JidoAph.DeepVerifier` (checked: the module loads, declares the
     behaviour, and exports `verify/2`).
+  - `:check_window` (default `true`) — the §8.3 validity-window check.
+    Default ON: it was absent, and its absence admitted a 98-day-expired
+    authorization. Setting it `false` is an explicit, named decision to
+    accept envelopes outside their window, and the admit context records
+    that the check did not run.
+  - `:clock` (default `:system`) — `:system`, a `DateTime`, or an RFC 3339
+    string. A pinned clock exists because every published example is now
+    past its window, so a demo or a fixture-driven test must be able to
+    reach the admit path — while SAYING it pinned the clock. A value that
+    is neither refuses the envelope rather than inventing a verdict
+    (SQUILLO_BOOK ch.15 §146).
+  - `:clock_skew_seconds` (default `60`) — allowed drift on both edges of
+    the window, per the spec's RECOMMENDED tolerance.
 
   Note: tests calling `prepare_signal/2` directly bypass this validation —
   the gate reads `context.config` with the same defaults the schema
@@ -143,7 +160,7 @@ defmodule JidoAph.Guard do
   | Signatures over JCS/RFC 8785 (§8.3) | no | YES — all four Ed25519 | |
   | Issuance order (§7.2.1) | no | YES | |
   | Embedded delegation-mandate binding (§8.3.1 step 1d) | no | YES | |
-  | Validity window (60s skew) | no | YES — against pinned `now`, stated | |
+  | Validity window (§8.3, 60s skew) | YES — `:check_window`, default on | YES — against pinned `now`, stated | |
   | bodySha256 over received bytes (§8.3 step 8, APH_E009) | no | YES | |
   | Closed channel/contentClass vocabulary (§7.1.5/§7.1.6) | no (aph-ex exposes no such op) | YES (TS enforces) | |
   | Key discovery: DNS TXT / did:web (§8.4) | no | no (TS never fetches; did:key decodes offline; the golden's one did:web notary key is supplied via `options.keys` and the transcript says so) | YES — named in README |
@@ -217,7 +234,10 @@ defmodule JidoAph.Guard do
                      signal_patterns: Zoi.list(Zoi.string()) |> Zoi.default([]),
                      refusal: Zoi.literal(:refuse_and_log) |> Zoi.default(:refuse_and_log),
                      depth: Zoi.enum([:structural, :deep]) |> Zoi.default(:structural),
-                     deep_verifier: Zoi.atom() |> Zoi.default(nil)
+                     deep_verifier: Zoi.atom() |> Zoi.default(nil),
+                     check_window: Zoi.boolean() |> Zoi.default(true),
+                     clock: Zoi.any() |> Zoi.default(:system),
+                     clock_skew_seconds: Zoi.integer() |> Zoi.default(60)
                    },
                    unrecognized_keys: :error
                  )
@@ -257,7 +277,7 @@ defmodule JidoAph.Guard do
           handle_missing(signal, required)
 
         %{envelope_json: envelope_json} when is_binary(envelope_json) ->
-          gate(signal, envelope_json, require_mode)
+          gate(signal, envelope_json, require_mode, config)
       end
     else
       # Out of the configured scope: pass through un-gated with an empty
@@ -371,7 +391,7 @@ defmodule JidoAph.Guard do
     {:ok, signal, %{aph: %{notarization: :absent, tag: :unverified}}}
   end
 
-  defp gate(signal, envelope_json, require_mode) do
+  defp gate(signal, envelope_json, require_mode, config) do
     # `normalized` is APH.parse_envelope_json/1's OUTPUT, and it is the only
     # thing Envelope.from_normalized/1 is ever handed. Passing `envelope_json`
     # there instead would put a second parser on the trust path — see
@@ -383,7 +403,8 @@ defmodule JidoAph.Guard do
          {:ok, normalized} <- APH.parse_envelope_json(envelope_json),
          :ok <- check_mode(envelope_json, require_mode),
          {:ok, structure_mode} <- APH.verify_proof_structure(envelope_json),
-         {:ok, envelope} <- Envelope.from_normalized(normalized) do
+         {:ok, envelope} <- Envelope.from_normalized(normalized),
+         :ok <- check_window(envelope, config) do
       admit(signal, envelope, structure_mode, require_mode)
     else
       {:error, reason} -> refuse(signal, reason)
@@ -414,6 +435,82 @@ defmodule JidoAph.Guard do
   # but outside the refusal contract and with no a2a-extension.md §5 audit
   # record. Refused here instead. No APH code and no spec citation — the
   # specification says nothing about transfer encoding, so neither does this.
+  # §8.3's time-window step. It is a MUST in the specification and this gate
+  # did not implement it — the demo's own happy path admitted a golden that
+  # expired 2026-05-22, and every one of the twelve published examples is
+  # past its window. The excuse available was the project's "no cryptography
+  # in Elixir" non-goal, and it never covered this: comparing two RFC 3339
+  # instants is a comparison, not a cipher.
+  #
+  # NO BORROWED CODE. The spec's closed §11 table has no code for an
+  # envelope's own window failing against the clock: `APH_E003` is
+  # `MandateExpired`, defined for "a Communication Mandate or Delegation
+  # Mandate consulted past its expiresAt / validUntil" — a different subject.
+  # Miscited codes are how a taxonomy stops meaning anything, so this refusal
+  # carries a guard-authored message and no code, and the gap is filed
+  # upstream (aph RFC 0003 proposes APH_E019).
+  #
+  # `:clock` exists because the published corpus is expired and a demo must
+  # be able to run against it while SAYING SO. A pinned clock that lies
+  # silently would be worse than no check; `admit/4` reports which clock
+  # ruled, and the transcript prints it.
+  defp check_window(envelope, config) do
+    if Map.get(config, :check_window, true) do
+      now = resolve_clock(Map.get(config, :clock, :system))
+      skew = Map.get(config, :clock_skew_seconds, 60)
+
+      compare_window(Envelope.valid_from(envelope), Envelope.valid_until(envelope), now, skew)
+    else
+      :ok
+    end
+  end
+
+  defp resolve_clock(:system), do: DateTime.utc_now()
+  defp resolve_clock(%DateTime{} = pinned), do: pinned
+
+  defp resolve_clock(pinned) when is_binary(pinned) do
+    case DateTime.from_iso8601(pinned) do
+      {:ok, dt, _offset} -> dt
+      _ -> :invalid_clock
+    end
+  end
+
+  defp resolve_clock(_), do: :invalid_clock
+
+  # A verifier that cannot establish its own clock cannot judge a window, and
+  # inventing one of the two verdicts is exactly the fail-open this check
+  # exists to delete. Refuse instead.
+  defp compare_window(_from, _until, :invalid_clock, _skew),
+    do: {:error, "window check: the configured :clock is not an RFC 3339 instant or a DateTime"}
+
+  defp compare_window(nil, _until, _now, _skew),
+    do: {:error, "window check: the envelope declares no validFrom"}
+
+  defp compare_window(_from, nil, _now, _skew),
+    do: {:error, "window check: the envelope declares no validUntil"}
+
+  defp compare_window(from, until, now, skew) do
+    with {:ok, from_dt, _} <- DateTime.from_iso8601(from),
+         {:ok, until_dt, _} <- DateTime.from_iso8601(until) do
+      cond do
+        DateTime.compare(now, DateTime.add(from_dt, -skew, :second)) == :lt ->
+          {:error,
+           "window check: envelope not yet valid (validFrom #{from}, clock " <>
+             "#{DateTime.to_iso8601(now)}, #{skew}s skew allowed)"}
+
+        DateTime.compare(now, DateTime.add(until_dt, skew, :second)) == :gt ->
+          {:error,
+           "window check: envelope expired (validUntil #{until}, clock " <>
+             "#{DateTime.to_iso8601(now)}, #{skew}s skew allowed)"}
+
+        true ->
+          :ok
+      end
+    else
+      _ -> {:error, "window check: validFrom/validUntil are not both RFC 3339 instants"}
+    end
+  end
+
   defp check_text(envelope_json) do
     if String.valid?(envelope_json) do
       :ok

@@ -72,10 +72,17 @@ defmodule Demo.RunTranscriptTest do
     assert transcript =~ "[10] HONESTY FOOTER"
     assert transcript =~ "N1  No Ed25519 signature was checked"
     assert transcript =~ "N2  No key was discovered or resolved"
-    assert transcript =~ "N3  The validity window was never compared against any clock"
-    assert transcript =~ "N4  Revocation was never consulted"
-    assert transcript =~ "N5  bodySha256 was never recomputed"
-    assert transcript =~ "N6  The closed channel and contentClass vocabularies"
+    # The window used to be on the never-run list; it is now gate step S5.
+    # Pinning BOTH facts — that S5 runs, and that the transcript says which
+    # clock it judged against — is what stops the check from being quietly
+    # removed or silently pinned later.
+    assert transcript =~ "S5  §8.3 step 6"
+    assert transcript =~ "PINNED"
+    assert transcript =~ "The clock is pinned, and saying so is the point."
+    refute transcript =~ "The validity window was never compared against any clock"
+    assert transcript =~ "N3  Revocation was never consulted"
+    assert transcript =~ "N4  bodySha256 was never recomputed"
+    assert transcript =~ "N5  The closed channel and contentClass vocabularies"
     assert transcript =~ "did:web:aph-notary.squillo.com was not contacted"
     assert transcript =~ Demo.Narrative.aph_ex_quote()
   end

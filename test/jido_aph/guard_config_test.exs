@@ -55,7 +55,10 @@ defmodule JidoAph.GuardConfigTest do
 
   # Why: the documented defaults ARE the security posture — required: true
   # (fail closed on missing envelopes), no mode policy, gate everything,
-  # refuse-and-log, structural depth, no verifier. This pins the exact
+  # refuse-and-log, structural depth, no verifier, and check_window: true
+  # against the system clock. That last default is the one this repo got
+  # wrong: the window check did not exist, so every expired envelope was
+  # admitted. A default flipping back to false must fail HERE. This pins the exact
   # resolved map so a default drifting (e.g. required flipping to false)
   # fails a test, not a deployment.
   test "empty config resolves to the exact documented defaults" do
@@ -65,7 +68,10 @@ defmodule JidoAph.GuardConfigTest do
              signal_patterns: [],
              refusal: :refuse_and_log,
              depth: :structural,
-             deep_verifier: nil
+             deep_verifier: nil,
+             check_window: true,
+             clock: :system,
+             clock_skew_seconds: 60
            }
   end
 
@@ -83,7 +89,10 @@ defmodule JidoAph.GuardConfigTest do
              signal_patterns: ["slack.reply.requested"],
              refusal: :refuse_and_log,
              depth: :structural,
-             deep_verifier: nil
+             deep_verifier: nil,
+             check_window: true,
+             clock: :system,
+             clock_skew_seconds: 60
            }
   end
 
@@ -289,7 +298,11 @@ defmodule JidoAph.GuardConfigTest do
       required: true,
       require_mode: "PrincipalSigned",
       depth: :deep,
-      deep_verifier: SeamProbe
+      deep_verifier: SeamProbe,
+      # The golden is past its window; pinned so this test measures the
+      # depth seam rather than the window check (JidoAph.GuardTest carries
+      # the same constant and the same reason).
+      clock: "2026-05-21T12:00:00Z"
     }
 
     signal = signal_with(golden())

@@ -57,11 +57,23 @@ defmodule Demo.Corpus do
   """
 
   @doc """
+  The instant the demo judges validity windows against.
+
+  Inside the golden's `validFrom`..`validUntil` (2026-05-21 -> 2026-05-22),
+  which is now in the past — as is every published example's window. The
+  demo pins this so the guard's §8.3 window check can reach an admit on a
+  real fixture, and every transcript that relies on it says the clock is
+  pinned. `mix demo.deep_verify` pins the same instant for the same reason.
+  """
+  @spec pinned_now() :: String.t()
+  def pinned_now, do: "2026-05-21T12:00:00Z"
+
+  @doc """
   The resolved aph repo path, validated to look like an aph clone.
 
-  Expands the configured path against `File.cwd!()` and raises with the
-  sibling-clone instruction when the path — or its `examples/` corpus
-  directory — is absent.
+  Resolves config, then `APH_PATH`, then the `:aph` dependency's checkout
+  (see the moduledoc), and raises with the full remedy when the winning
+  candidate has no `examples/` corpus directory.
   """
   @spec repo_path!() :: Path.t()
   def repo_path! do

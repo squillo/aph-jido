@@ -30,7 +30,19 @@ defmodule Demo.Agents.Gateway do
        %{
          required: true,
          require_mode: "PrincipalSigned",
-         signal_patterns: ["slack.reply.requested"]
+         signal_patterns: ["slack.reply.requested"],
+         # The golden's window closed 2026-05-22 and every published example
+         # is now past its own, so against the real clock this demo has
+         # nothing left to admit — the guard refuses the very fixture the
+         # story is built on. The clock is therefore pinned INSIDE the
+         # window, exactly as `mix demo.deep_verify` has always pinned it
+         # for the same reason, and the provenance banner prints the pin.
+         #
+         # Pinned, not disabled: `check_window: false` would demonstrate a
+         # gate the shipped default does not use, and the absence of this
+         # very check is the defect the demo now exists to show being
+         # caught.
+         clock: Demo.Corpus.pinned_now()
        }}
     ],
     signal_routes: [
