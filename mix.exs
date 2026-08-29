@@ -6,7 +6,7 @@ defmodule JidoAph.MixProject do
   # re-derives three golden fixture digests from it, so the interpreter and
   # the fixtures are guaranteed to be the same commit. Bumping this is a
   # deliberate reviewed change and must move both places at once.
-  @aph_ref "9b94ec13b7a5ada079e661e068734736e20ae9eb"
+  @aph_ref "e08e8d5031b6c3e0a56535622305be8d625cdc8a"
 
   def project do
     [

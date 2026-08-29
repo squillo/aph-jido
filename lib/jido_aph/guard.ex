@@ -537,18 +537,21 @@ defmodule JidoAph.Guard do
   # specification says nothing about transfer encoding, so neither does this.
   # §8.3's time-window step. It is a MUST in the specification and this gate
   # did not implement it — the demo's own happy path admitted a golden that
-  # expired 2026-05-22, and every one of the twelve published examples is
-  # past its window. The excuse available was the project's "no cryptography
-  # in Elixir" non-goal, and it never covered this: comparing two RFC 3339
-  # instants is a comparison, not a cipher.
+  # expired 2026-05-22, and every one of the fourteen published examples is
+  # past its window (minutes-order now, per §6.3's RFC 0003 guidance). The
+  # excuse available was the project's "no cryptography in Elixir" non-goal,
+  # and it never covered this: comparing two RFC 3339 instants is a
+  # comparison, not a cipher.
   #
-  # NO BORROWED CODE. The spec's closed §11 table has no code for an
-  # envelope's own window failing against the clock: `APH_E003` is
-  # `MandateExpired`, defined for "a Communication Mandate or Delegation
-  # Mandate consulted past its expiresAt / validUntil" — a different subject.
-  # Miscited codes are how a taxonomy stops meaning anything, so this refusal
-  # carries a guard-authored message and no code, and the gap is filed
-  # upstream (aph RFC 0003 proposes APH_E019).
+  # THE CODE EXISTS NOW. This refusal originally shipped with a
+  # guard-authored message and NO code, because the closed §11 table had
+  # none for an envelope's own window against the clock (`APH_E003` is
+  # `MandateExpired`, a different subject) and miscited codes are how a
+  # taxonomy stops meaning anything. The gap this guard filed upstream was
+  # accepted: RFC 0003 (Accepted 2026-08-29) registers `APH_E019
+  # EnvelopeWindowInvalid` for exactly this refusal — unparseable-fails-
+  # closed included — and the messages below now carry it. The refusal that
+  # declined to borrow is the reason the right code exists to cite.
   #
   # `:clock` exists because the published corpus is expired and a demo must
   # be able to run against it while SAYING SO. A pinned clock that lies
@@ -584,10 +587,10 @@ defmodule JidoAph.Guard do
     do: {:error, "window check: the configured :clock is not an RFC 3339 instant or a DateTime"}
 
   defp compare_window(nil, _until, _now, _skew),
-    do: {:error, "window check: the envelope declares no validFrom"}
+    do: {:error, "APH_E019: window check: the envelope declares no validFrom"}
 
   defp compare_window(_from, nil, _now, _skew),
-    do: {:error, "window check: the envelope declares no validUntil"}
+    do: {:error, "APH_E019: window check: the envelope declares no validUntil"}
 
   defp compare_window(from, until, now, skew) do
     with {:ok, from_dt, _} <- DateTime.from_iso8601(from),
@@ -595,19 +598,19 @@ defmodule JidoAph.Guard do
       cond do
         DateTime.compare(now, DateTime.add(from_dt, -skew, :second)) == :lt ->
           {:error,
-           "window check: envelope not yet valid (validFrom #{from}, clock " <>
+           "APH_E019: window check: envelope not yet valid (validFrom #{from}, clock " <>
              "#{DateTime.to_iso8601(now)}, #{skew}s skew allowed)"}
 
         DateTime.compare(now, DateTime.add(until_dt, skew, :second)) == :gt ->
           {:error,
-           "window check: envelope expired (validUntil #{until}, clock " <>
+           "APH_E019: window check: envelope expired (validUntil #{until}, clock " <>
              "#{DateTime.to_iso8601(now)}, #{skew}s skew allowed)"}
 
         true ->
           :ok
       end
     else
-      _ -> {:error, "window check: validFrom/validUntil are not both RFC 3339 instants"}
+      _ -> {:error, "APH_E019: window check: validFrom/validUntil are not both RFC 3339 instants"}
     end
   end
 

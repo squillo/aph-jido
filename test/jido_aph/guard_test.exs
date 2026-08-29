@@ -41,13 +41,14 @@ defmodule JidoAph.GuardTest do
 
   defp ctx(config), do: %{config: config}
 
-  # The golden's window is 2026-05-21 -> 2026-05-22 and every published
-  # example is now past it, so a test that wants to reach the ADMIT path has
+  # The golden's window is ten MINUTES from 2026-05-21T00:00:00Z — §6.3's
+  # minutes-order rule (RFC 0003) reached the corpus — and every published
+  # example is past it, so a test that wants to reach the ADMIT path has
   # to pin the clock inside the window. Pinned openly rather than by turning
   # the check off: `check_window: false` would exercise a gate the shipped
   # default does not use, and the whole reason this constant exists is that
   # the window check was missing and nothing failed.
-  @pinned_now "2026-05-21T12:00:00Z"
+  @pinned_now "2026-05-21T00:05:00Z"
 
   @principal_signed_config %{
     required: true,
@@ -357,8 +358,8 @@ defmodule JidoAph.GuardTest do
   # Why this test exists: it is the defect that started the pressure test.
   # The guard shipped with NO validity-window check at all — `lib/` held not
   # one reference to DateTime, validFrom or validUntil — so the demo's own
-  # happy path admitted a golden that expired 2026-05-22, and all twelve
-  # published examples are past their windows. This pins the refusal against
+  # happy path admitted a golden that expired 2026-05-22, and all fourteen
+  # published examples are past their (now minutes-order) windows. This pins the refusal against
   # the REAL system clock, deliberately using no pinned clock, so the test
   # goes red again the day the check is removed or defaulted off.
   test "the expired golden is refused against the system clock (§8.3 time window)" do
@@ -367,11 +368,15 @@ defmodule JidoAph.GuardTest do
 
     assert reason =~ "window check"
     assert reason =~ "expired"
-    # No borrowed code. APH_E003 is MandateExpired, scoped to a Communication
-    # or Delegation Mandate — not an envelope's own window against a clock —
-    # and miscitation is how a closed taxonomy stops meaning anything. The
-    # gap is filed upstream (aph RFC 0003 proposes APH_E019).
-    refute reason =~ "APH_E"
+    # This assertion used to be `refute reason =~ "APH_E"` — no borrowed
+    # code, because the closed taxonomy had none for an envelope's own
+    # window and APH_E003 is a mandate's. The gap this guard filed upstream
+    # was ACCEPTED (RFC 0003, 2026-08-29): APH_E019 EnvelopeWindowInvalid is
+    # the registered code for exactly this refusal, and E003 remains
+    # mandate-scoped. The flip from refute to assert is the upstream ruling
+    # arriving here.
+    assert reason =~ "APH_E019"
+    refute reason =~ "APH_E003"
   end
 
   # Why this test exists: SQUILLO_BOOK ch.15 §202 — "A Security Guard Is Not
@@ -381,7 +386,7 @@ defmodule JidoAph.GuardTest do
   # cells straddle the boundary at +/-1s around the 60s skew, so flipping the
   # comparator or dropping the skew term kills at least one of them.
   test "the skew boundary is pinned on both sides, at one-second resolution" do
-    # validUntil is 2026-05-22T00:00:00Z; skew is 60s.
+    # validUntil is 2026-05-21T00:10:00Z (minutes-order, RFC 0003); skew is 60s.
     admit = fn clock ->
       match?(
         {:ok, _, _},
@@ -389,9 +394,9 @@ defmodule JidoAph.GuardTest do
       )
     end
 
-    assert admit.("2026-05-22T00:00:59Z"), "59s past validUntil is inside the 60s skew"
-    assert admit.("2026-05-22T00:01:00Z"), "exactly 60s past validUntil is still inside the skew"
-    refute admit.("2026-05-22T00:01:01Z"), "61s past validUntil is outside the skew"
+    assert admit.("2026-05-21T00:10:59Z"), "59s past validUntil is inside the 60s skew"
+    assert admit.("2026-05-21T00:11:00Z"), "exactly 60s past validUntil is still inside the skew"
+    refute admit.("2026-05-21T00:11:01Z"), "61s past validUntil is outside the skew"
 
     # The not-yet-valid side, which a check written only for expiry misses.
     refute admit.("2026-05-20T23:58:59Z"), "61s before validFrom is outside the skew"

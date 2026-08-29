@@ -59,7 +59,7 @@ defmodule JidoAph.EnvelopeTest do
     # Still pinned to a count, so a manifest that silently loses entries
     # fails here rather than quietly testing less. The number tracks
     # upstream's conformance set, not a directory listing.
-    assert length(names) == 12
+    assert length(names) == 14
 
     for name <- names do
       raw = Corpus.example!(name)

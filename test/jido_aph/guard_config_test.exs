@@ -304,7 +304,7 @@ defmodule JidoAph.GuardConfigTest do
       # The golden is past its window; pinned so this test measures the
       # depth seam rather than the window check (JidoAph.GuardTest carries
       # the same constant and the same reason).
-      clock: "2026-05-21T12:00:00Z"
+      clock: "2026-05-21T00:05:00Z"
     }
 
     signal = signal_with(golden())
