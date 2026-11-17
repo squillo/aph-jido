@@ -39,12 +39,12 @@ defmodule Demo.DeepVerifierTest do
 
   # The instant the golden is evaluated against, pinned rather than read from
   # the clock. The golden's window is validFrom 2026-05-21T00:00:00Z ..
-  # validUntil 2026-05-22T00:00:00Z, and this is the aph testkit's own chosen
+  # validUntil 2026-05-21T00:10:00Z, and this is the aph testkit's own chosen
   # instant inside it (interpreters/typescript/testkit/golden.ts,
   # GOLDEN_EVALUATION_INSTANT) — reused so the two repos evaluate the same
   # fixture at the same moment. A verifier that read the wall clock would pass
   # today and fail in 2027; T13 states this pin out loud in its transcript.
-  @pinned_now "2026-05-21T12:00:00Z"
+  @pinned_now "2026-05-21T00:05:00Z"
 
   # The golden's notary. NOT a live service and never contacted: a did:web key
   # is published at a .well-known document a verifier would fetch (§8.4.4), and

@@ -73,7 +73,7 @@ defmodule Demo.DeepVerifyTranscriptTest do
   # What it pins beyond the five DONE items:
   #
   #   * that the per-leg spec-step enumeration is attributed to the step that
-  #     really refused (APH_E003 -> D9, APH_E011 -> D5), not scripted;
+  #     really refused (APH_E019 -> D9, APH_E011 -> D5), not scripted;
   #   * that the GUARD's own captured log lines never contain the bare words
   #     "verified" or "signed", even though this transcript legitimately does —
   #     the deep leg earned those words and the guard did not;
@@ -142,7 +142,7 @@ defmodule Demo.DeepVerifyTranscriptTest do
     # 2. The wall-clock refusal beat.
     assert transcript =~ "[5] LEG 2 — THE WALL-CLOCK BEAT"
     assert transcript =~ "REFUSED on the validity window"
-    assert transcript =~ "APH_E003 (MandateExpired)"
+    assert transcript =~ "APH_E019 (EnvelopeWindowInvalid)"
     assert transcript =~ "outside the envelope window"
 
     # 3. The depth-split line, with both halves of the beat around it.
@@ -247,7 +247,7 @@ defmodule Demo.DeepVerifyTranscriptTest do
 
     assert stdout =~ "[1] PROVENANCE"
     assert stdout =~ DeepVerify.pin_sentence()
-    assert stdout =~ "APH_E003"
+    assert stdout =~ "APH_E019"
     assert stdout =~ "APH_E011"
     assert stdout =~ DeepVerify.depth_split_line()
     assert stdout =~ DeepVerify.key_sourcing_line()
@@ -293,7 +293,7 @@ defmodule Demo.DeepVerifyTranscriptTest do
     assert committed =~ "pinned now            " <> DeepVerify.pinned_now()
     assert committed =~ DeepVerify.depth_split_line()
     assert committed =~ DeepVerify.key_sourcing_line()
-    assert committed =~ "APH_E003 (MandateExpired)"
+    assert committed =~ "APH_E019 (EnvelopeWindowInvalid)"
     assert committed =~ "APH_E011 (PrincipalSignatureInvalid)"
     assert committed =~ "[7] WHAT THIS LEG ADDS"
     assert committed =~ "[8] WHAT IT STILL DOES NOT DO"

@@ -5,7 +5,7 @@ defmodule Demo.MixProject do
   # library, because a mix.exs cannot depend on the project it depends on:
   # the two must be bumped together, and CI's fixture-drift digests pin the
   # same SHA, so a mismatch fails loudly rather than reading other bytes.
-  @aph_ref "e08e8d5031b6c3e0a56535622305be8d625cdc8a"
+  @aph_ref "63fa269a35db70d8e0c86d87d499cbd23fb88147"
 
   def project do
     [

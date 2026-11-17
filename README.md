@@ -453,13 +453,13 @@ currently stale, and this repository reports that as an erratum (see
 
 | Fact | Value |
 |---|---|
-| aph pin | `f01e3470f86533c4099db8ab0ab6b155bd0ea4aa` |
-| `examples/principal_signed_envelope.json` | 3382 bytes, sha256 `8a6015d873786b533fa00f16b3f789a7984be61d631d5cd9e3515f7c5e721466` |
+| aph pin | `63fa269a35db70d8e0c86d87d499cbd23fb88147` |
+| `examples/principal_signed_envelope.json` | 3382 bytes, sha256 `473265e53461a62d1043cc4ca25935f968e36cf6c7cdfb18bdcb18cd1cd9a093` |
 | `examples/principal_signed_body.txt` | **427 bytes**, sha256 `dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb` |
 | envelope's `credentialSubject.communication.bodySha256` | `dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb` — equal to the recomputed digest of the tracked body file |
 | envelope's `bodySize` | `427` — equal to the bytes on disk |
-| envelope validity window | `2026-05-21T00:00:00Z` .. `2026-05-22T00:00:00Z` (past; the deep leg's pinned `now` is `2026-05-21T12:00:00Z`, and says so) |
-| `examples/slack_reply_envelope.json` | sha256 `b8ffb64d42682db4406cc0c25d4c15f52c23eaff7da456aad5d82c6fb71a3640` — the mode-absent fixture, refusal row 3 |
+| envelope validity window | `2026-05-21T00:00:00Z` .. `2026-05-21T00:10:00Z` (past; the deep leg's pinned `now` is `2026-05-21T00:05:00Z`, and says so) |
+| `examples/slack_reply_envelope.json` | sha256 `797867ae22e11f5b925fadab50f80589b0dafbf4b69801be1e6d03688f45f9b5` — the mode-absent fixture, refusal row 3 |
 
 The golden's body binding is **byte-real**: the authorized bytes are published
 in the aph repo as a tracked file and they hash to the envelope's own digest.
@@ -620,9 +620,20 @@ reader can fetch for themselves.
   corpus source         the :aph dependency's checkout, resolved at
                         runtime (APH_PATH, or an explicit
                         :aph_repo_path, override it)
-  aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
-  aph worktree          clean at HEAD
+  aph HEAD              63fa269a35db70d8e0c86d87d499cbd23fb88147
+  aph worktree          DIRTY — 1 path(s) differ from HEAD; the bytes below may not match the SHA
   aph examples/         clean
+
+  clock (S5 judges      2026-05-21T00:05:00Z  — PINNED
+  the window against)   
+
+  The clock is pinned, and saying so is the point. The golden's window is
+  2026-05-21T00:00:00Z .. 2026-05-21T00:10:00Z, which has passed — as has
+  every published example's. Against the wall clock the gate refuses this
+  fixture at S5, correctly, and there would be no happy path to show. The
+  demo pins an instant INSIDE the window rather than switching the check
+  off, because a demo that disabled the gate to reach a green result would
+  be demonstrating a configuration nobody should ship.
 
   That SHA is READ from the checkout, not asserted against a pin. mix.exs
   does pin the dependency by ref, but this banner reports what it FOUND —
@@ -639,7 +650,7 @@ reader can fetch for themselves.
     attestationMode     PrincipalSigned  (§7.1.7)
     proof               2-element chain
     validFrom           2026-05-21T00:00:00Z
-    validUntil          2026-05-22T00:00:00Z
+    validUntil          2026-05-21T00:10:00Z
 
   authorized body       examples/principal_signed_body.txt
     bytes on disk       427
@@ -674,15 +685,18 @@ S3  §8.3.1 step 1a  APH.require_attestation_mode/2 — only when a mode
 S4  §7.1.11         APH.verify_proof_structure/1 — ALWAYS, even with
                     no mode policy, because S3 alone admits a forged
                     label (APH_E013)
+S5  §8.3 step 6     the validity window, 60s skew, against the clock
+                    named in the banner. A DateTime comparison, not a
+                    cipher — which is why its absence until 2026-08-28
+                    was never covered by "no cryptography on the BEAM"
 
 And the six things no leg below runs, at any depth, ever:
 
 N1  Ed25519 signatures over JCS/RFC 8785 (§8.3)
 N2  key discovery — DNS TXT / did:web (§8.4)
-N3  validity window (60s skew)
-N4  revocation / credentialStatus
-N5  bodySha256 over the received bytes (§8.3 step 8, APH_E009)
-N6  closed channel / contentClass vocabulary (§7.1.5 / §7.1.6)
+N3  revocation / credentialStatus
+N4  bodySha256 over the received bytes (§8.3 step 8, APH_E009)
+N5  the live notary — never contacted, by anything, at any point
 
 Each leg names, from what actually happened, which of S1-S4 RAN, which one
 REFUSED, and which were NEVER REACHED. N1-N6 are constant: they are what
@@ -755,9 +769,10 @@ about this run: nothing here was minted, and no human authorized anything.
       S2  §8.3 step 1     RAN
       S3  §8.3.1 step 1a  RAN
       S4  §7.1.11         RAN
+      S5  §8.3 step 6     RAN
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 live notary
 
 
 [4] LEG 2 — REFUSAL 1/6: no notarization extension, required: true
@@ -791,9 +806,10 @@ halves, the rejection and the log line, are visible in this block.
       S2  §8.3 step 1     NOT REACHED
       S3  §8.3.1 step 1a  NOT REACHED
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     NOT REACHED
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 live notary
 
 
 [5] LEG 3 — REFUSAL 2/6: a forged PrincipalSigned label (APH_E013)
@@ -836,9 +852,10 @@ never edited (PRD-001 §10 gate 4).
       S2  §8.3 step 1     RAN
       S3  §8.3.1 step 1a  RAN
       S4  §7.1.11         REFUSED  <- the leg stops here
+      S5  §8.3 step 6     not attributable
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 live notary
 
 
 [6] LEG 4 — REFUSAL 3/6: mode-absent vs a PrincipalSigned policy (APH_E012)
@@ -884,9 +901,10 @@ Its structure is sound, so the refusal is the mode policy and nothing else.
       S2  §8.3 step 1     RAN
       S3  §8.3.1 step 1a  REFUSED  <- the leg stops here
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     not attributable
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 live notary
 
 
 [7] LEG 5 — REFUSAL 4/6: an unknown envelope field (strict parse, no code)
@@ -923,9 +941,10 @@ that never parsed reached no protocol rule and may cite none.
       S2  §8.3 step 1     REFUSED  <- the leg stops here
       S3  §8.3.1 step 1a  NOT REACHED
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     not attributable
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 live notary
 
 
 [8] LEG 6 — REFUSAL 5/6: over the byte bound, refused before any parse
@@ -957,9 +976,10 @@ the strict parser ADMITS these very bytes.
       S2  §8.3 step 1     NOT REACHED
       S3  §8.3.1 step 1a  NOT REACHED
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     not attributable
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 live notary
 
 
 [9] LEG 7 — ROW 6/6: a bare signal under required: false, delivered tagged
@@ -992,9 +1012,10 @@ Delivery happens; it happens FLAGGED.
       S2  §8.3 step 1     NOT REACHED
       S3  §8.3.1 step 1a  NOT REACHED
       S4  §7.1.11         NOT REACHED
+      S5  §8.3 step 6     NOT REACHED
   never run, this or any leg:
-      N1 signatures     N2 key discovery   N3 validity window
-      N4 revocation     N5 bodySha256      N6 closed vocabulary
+      N1 signatures     N2 key discovery   N3 revocation
+      N4 bodySha256     N5 live notary
 
 
 [10] HONESTY FOOTER — what this run did not establish
@@ -1014,20 +1035,29 @@ included:
   N2  No key was discovered or resolved: no DNS TXT lookup, no did:web
       fetch, no did:key decode. Nothing on this rail resolves anything
       (§8.4).
-  N3  The validity window was never compared against any clock. The golden
-      declares 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z and no leg
-      above read it.
-  N4  Revocation was never consulted. The golden carries no
+  N3  Revocation was never consulted. The golden carries no
       credentialStatus, and no status transport exists in this repo.
-  N5  bodySha256 was never recomputed over the 427 received bytes. The
+  N4  bodySha256 was never recomputed over the 427 received bytes. The
       digest quoted in the banner
       (dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb)
       is the envelope's own claim (§8.3 step 8, APH_E009).
-  N6  The closed channel and contentClass vocabularies were never enforced.
-      aph-ex exposes no such op (§7.1.5 / §7.1.6).
+  N5  The live notary at did:web:aph-notary.squillo.com was not contacted,
+      by anything, at any point. Nothing above reached the network at all.
 
-  The live notary at did:web:aph-notary.squillo.com was not contacted, by
-  anything, at any point. Nothing above reached the network at all.
+  The closed channel and contentClass vocabularies LEFT this list too, and
+  for a better reason than the window did: upstream made those sets the
+  field TYPES (aph 57431e6), so an envelope naming a channel outside them
+  cannot be constructed and S2 refuses it at parse. No op is called and no
+  code here enforces it — the guard gained the check by moving its pin.
+
+  The validity window IS checked, and used not to be — which is why it is
+  no longer on this list. Until 2026-08-28 the gate had no window check at
+  all, and this demo's happy path admitted a golden that expired
+  2026-05-21T00:10:00Z. That check is now S5, it runs by default, and the
+  clock it judges against is stated in the banner above rather than
+  assumed. Every published example is past its own window today, so the
+  demo pins the clock inside the golden's; against the wall clock this
+  leg would refuse, and `mix demo.deep_verify` shows exactly that.
 
 aph-ex says it plainly of the one structural op this gate leans on hardest
 (../aph/interpreters/elixir/lib/aph.ex, verify_proof_structure/1):
@@ -1069,7 +1099,7 @@ Two notes on reading it. The bare words "verified" and "signed" appear freely
 here and that is correct — this leg *earned* them, having checked four Ed25519
 signatures; the bare-word rule binds the guard's own log lines, which are
 extracted and checked separately inside this very transcript. And the wall-clock
-refusal is `APH_E003 (MandateExpired)`, a validity-window refusal that arrives
+refusal is `APH_E019 (EnvelopeWindowInvalid)`, a validity-window refusal that arrives
 *after* every signature has already verified — it is proof the pin is
 load-bearing, not proof of a signature problem.
 
@@ -1098,8 +1128,8 @@ typescript/ alike. The SHA below is what attributes every verdict in this
 transcript to bytes a reader can fetch and re-run for themselves.
 
   corpus + verifier     one aph checkout, resolved at runtime
-  aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
-  aph worktree          clean at HEAD
+  aph HEAD              63fa269a35db70d8e0c86d87d499cbd23fb88147
+  aph worktree          DIRTY — 1 path(s) differ from HEAD; the bytes below may not match the SHA
   aph typescript/       source clean at HEAD
 
   That last line is about SOURCE, and it is worth saying what it does not
@@ -1152,9 +1182,9 @@ be tested deterministically".
 
 So the caller pins the instant. This task pins it out loud:
 
-  pinned now            2026-05-21T12:00:00Z
+  pinned now            2026-05-21T00:05:00Z
   envelope validFrom    2026-05-21T00:00:00Z
-  envelope validUntil   2026-05-22T00:00:00Z
+  envelope validUntil   2026-05-21T00:10:00Z
   inside the window     yes — compared on this run, not asserted
   clock skew            60 s, the §8.3 RECOMMENDED default
                         (DEFAULT_CLOCK_SKEW_SECONDS, src/types.ts)
@@ -1180,7 +1210,7 @@ instant, plus one key. Handed across a process boundary to verifyEnvelope and
 asked for the full §8.3 / §8.3.1 procedure.
 
   require_mode          "PrincipalSigned"
-  now                   2026-05-21T12:00:00Z
+  now                   2026-05-21T00:05:00Z
   body bytes supplied   yes, 427 — so §8.3 step 8 can run
 
   outcome               VERIFIED — verifyEnvelope returned a VerifiedEnvelope
@@ -1265,14 +1295,18 @@ One key handed in out of band, one that needs none, and zero fetched.
 The same bytes, the same key, the same everything — with `now` read from this
 machine's clock instead of pinned.
 
-  now                   2026-08-28T02:47:15.136804Z   <- varies every run
-  envelope window       2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
+  now                   2026-11-17T15:03:21.254980Z   <- varies every run
+  envelope window       2026-05-21T00:00:00Z .. 2026-05-21T00:10:00Z
 
   outcome               REFUSED on the validity window
-  code                  APH_E003
+  code                  APH_E019
   the verifier's own words, verbatim:
-      APH_E003 (MandateExpired): evaluated at 2026-08-28T02:47:15.136804Z,
-      outside the envelope window 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
+      APH_E019 (EnvelopeWindowInvalid): evaluated at
+      2026-11-17T15:03:21.254980Z, outside the envelope window
+      2026-05-21T00:00:00Z .. 2026-05-21T00:10:00Z — the envelope's OWN window
+      (APH_E003 is a mandate consulted past its expiry, and this
+      implementation shipped that miscite until RFC 0003 gave the envelope
+      window its own code)
 
   Read that as the good news it is. The golden's window closed on
   2026-05-22, so a fixture minted in May cannot be presented as authority
@@ -1320,7 +1354,7 @@ committed (PRD-001 §10 gate 4).
 
 HALF ONE — every check JidoAph.Guard runs, run on these exact bytes:
 
-    S1 §7.1.7.1         2736 B under the 65536 B bound: PASSES
+    S1 §7.1.7.1         2734 B under the 65536 B bound: PASSES
     S2 §8.3 step 1      strict parse: PASSES
     S3 §8.3.1 step 1a   mode gate: :ok
     S4 §7.1.11          proof structure: {:ok, "PrincipalSigned"}
@@ -1411,11 +1445,11 @@ the guard cannot reach at all, because no cryptography runs on the BEAM.
                        base (APH_E001)
   D8   §8.3.1 step 1d  the embedded §6.1 delegation mandate: bound to this
                        human and this agent, its allowedChannels covering
-                       this channel, its window enclosing the envelope's,
+                       this channel, its window enclosing the envelope's (APH_E003),
                        and its OWN two signatures — principalSignature
                        (APH_E011) and notarySignature (APH_E006)
   D9   §8.3 step 6     the validity window against the pinned `now`, 60 s
-                       skew (APH_E003)
+                       skew (APH_E019)
   D10  §8.3 step 8     bodySha256 recomputed over the body bytes AS
                        RECEIVED — never over a re-serialization of a parsed
                        object, because two JSON texts that parse equal can

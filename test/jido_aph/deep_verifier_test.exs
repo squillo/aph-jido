@@ -57,6 +57,6 @@ defmodule JidoAph.DeepVerifierTest do
 
     assert JidoAph.DeepVerifier in behaviours
     assert function_exported?(mod, :verify, 2)
-    assert {:error, :seam_probe_never_verifies} = mod.verify("{}", now: "2026-05-21T12:00:00Z")
+    assert {:error, :seam_probe_never_verifies} = mod.verify("{}", now: "2026-05-21T00:05:00Z")
   end
 end
