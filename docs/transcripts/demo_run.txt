@@ -18,15 +18,15 @@ reader can fetch for themselves.
   corpus source         the :aph dependency's checkout, resolved at
                         runtime (APH_PATH, or an explicit
                         :aph_repo_path, override it)
-  aph HEAD              9b94ec13b7a5ada079e661e068734736e20ae9eb
-  aph worktree          clean at HEAD
+  aph HEAD              63fa269a35db70d8e0c86d87d499cbd23fb88147
+  aph worktree          DIRTY — 1 path(s) differ from HEAD; the bytes below may not match the SHA
   aph examples/         clean
 
-  clock (S5 judges      2026-05-21T12:00:00Z  — PINNED
+  clock (S5 judges      2026-05-21T00:05:00Z  — PINNED
   the window against)   
 
   The clock is pinned, and saying so is the point. The golden's window is
-  2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z, which has passed — as has
+  2026-05-21T00:00:00Z .. 2026-05-21T00:10:00Z, which has passed — as has
   every published example's. Against the wall clock the gate refuses this
   fixture at S5, correctly, and there would be no happy path to show. The
   demo pins an instant INSIDE the window rather than switching the check
@@ -48,7 +48,7 @@ reader can fetch for themselves.
     attestationMode     PrincipalSigned  (§7.1.7)
     proof               2-element chain
     validFrom           2026-05-21T00:00:00Z
-    validUntil          2026-05-22T00:00:00Z
+    validUntil          2026-05-21T00:10:00Z
 
   authorized body       examples/principal_signed_body.txt
     bytes on disk       427
@@ -451,7 +451,7 @@ included:
   The validity window IS checked, and used not to be — which is why it is
   no longer on this list. Until 2026-08-28 the gate had no window check at
   all, and this demo's happy path admitted a golden that expired
-  2026-05-22T00:00:00Z. That check is now S5, it runs by default, and the
+  2026-05-21T00:10:00Z. That check is now S5, it runs by default, and the
   clock it judges against is stated in the banner above rather than
   assumed. Every published example is past its own window today, so the
   demo pins the clock inside the golden's; against the wall clock this

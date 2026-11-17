@@ -19,8 +19,8 @@ typescript/ alike. The SHA below is what attributes every verdict in this
 transcript to bytes a reader can fetch and re-run for themselves.
 
   corpus + verifier     one aph checkout, resolved at runtime
-  aph HEAD              f01e3470f86533c4099db8ab0ab6b155bd0ea4aa
-  aph worktree          clean at HEAD
+  aph HEAD              63fa269a35db70d8e0c86d87d499cbd23fb88147
+  aph worktree          DIRTY — 1 path(s) differ from HEAD; the bytes below may not match the SHA
   aph typescript/       source clean at HEAD
 
   That last line is about SOURCE, and it is worth saying what it does not
@@ -73,9 +73,9 @@ be tested deterministically".
 
 So the caller pins the instant. This task pins it out loud:
 
-  pinned now            2026-05-21T12:00:00Z
+  pinned now            2026-05-21T00:05:00Z
   envelope validFrom    2026-05-21T00:00:00Z
-  envelope validUntil   2026-05-22T00:00:00Z
+  envelope validUntil   2026-05-21T00:10:00Z
   inside the window     yes — compared on this run, not asserted
   clock skew            60 s, the §8.3 RECOMMENDED default
                         (DEFAULT_CLOCK_SKEW_SECONDS, src/types.ts)
@@ -101,7 +101,7 @@ instant, plus one key. Handed across a process boundary to verifyEnvelope and
 asked for the full §8.3 / §8.3.1 procedure.
 
   require_mode          "PrincipalSigned"
-  now                   2026-05-21T12:00:00Z
+  now                   2026-05-21T00:05:00Z
   body bytes supplied   yes, 427 — so §8.3 step 8 can run
 
   outcome               VERIFIED — verifyEnvelope returned a VerifiedEnvelope
@@ -186,14 +186,18 @@ One key handed in out of band, one that needs none, and zero fetched.
 The same bytes, the same key, the same everything — with `now` read from this
 machine's clock instead of pinned.
 
-  now                   2026-08-28T02:47:15.136804Z   <- varies every run
-  envelope window       2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
+  now                   2026-11-17T15:03:21.254980Z   <- varies every run
+  envelope window       2026-05-21T00:00:00Z .. 2026-05-21T00:10:00Z
 
   outcome               REFUSED on the validity window
-  code                  APH_E003
+  code                  APH_E019
   the verifier's own words, verbatim:
-      APH_E003 (MandateExpired): evaluated at 2026-08-28T02:47:15.136804Z,
-      outside the envelope window 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z
+      APH_E019 (EnvelopeWindowInvalid): evaluated at
+      2026-11-17T15:03:21.254980Z, outside the envelope window
+      2026-05-21T00:00:00Z .. 2026-05-21T00:10:00Z — the envelope's OWN window
+      (APH_E003 is a mandate consulted past its expiry, and this
+      implementation shipped that miscite until RFC 0003 gave the envelope
+      window its own code)
 
   Read that as the good news it is. The golden's window closed on
   2026-05-22, so a fixture minted in May cannot be presented as authority
@@ -241,7 +245,7 @@ committed (PRD-001 §10 gate 4).
 
 HALF ONE — every check JidoAph.Guard runs, run on these exact bytes:
 
-    S1 §7.1.7.1         2736 B under the 65536 B bound: PASSES
+    S1 §7.1.7.1         2734 B under the 65536 B bound: PASSES
     S2 §8.3 step 1      strict parse: PASSES
     S3 §8.3.1 step 1a   mode gate: :ok
     S4 §7.1.11          proof structure: {:ok, "PrincipalSigned"}
@@ -332,11 +336,11 @@ the guard cannot reach at all, because no cryptography runs on the BEAM.
                        base (APH_E001)
   D8   §8.3.1 step 1d  the embedded §6.1 delegation mandate: bound to this
                        human and this agent, its allowedChannels covering
-                       this channel, its window enclosing the envelope's,
+                       this channel, its window enclosing the envelope's (APH_E003),
                        and its OWN two signatures — principalSignature
                        (APH_E011) and notarySignature (APH_E006)
   D9   §8.3 step 6     the validity window against the pinned `now`, 60 s
-                       skew (APH_E003)
+                       skew (APH_E019)
   D10  §8.3 step 8     bodySha256 recomputed over the body bytes AS
                        RECEIVED — never over a re-serialization of a parsed
                        object, because two JSON texts that parse equal can

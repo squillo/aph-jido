@@ -89,9 +89,9 @@ defmodule Mix.Tasks.Demo.DeepVerify do
   # The instant every verdict below rests on. Chosen, not read: it is the aph
   # testkit's own GOLDEN_EVALUATION_INSTANT
   # (interpreters/typescript/testkit/golden.ts), which sits inside the golden's
-  # 2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z window — so this demo and its
+  # 2026-05-21T00:00:00Z .. 2026-05-21T00:10:00Z window — so this demo and its
   # upstream evaluate the same fixture at the same moment.
-  @pinned_now "2026-05-21T12:00:00Z"
+  @pinned_now "2026-05-21T00:05:00Z"
 
   @require_mode "PrincipalSigned"
 
@@ -731,7 +731,7 @@ defmodule Mix.Tasks.Demo.DeepVerify do
     }
   end
 
-  defp wall_clock_outcome({:error, %{kind: :refusal, code: "APH_E003"} = refusal}) do
+  defp wall_clock_outcome({:error, %{kind: :refusal, code: "APH_E019"} = refusal}) do
     lines =
       [
         kv("outcome", "REFUSED on the validity window"),
@@ -780,7 +780,7 @@ defmodule Mix.Tasks.Demo.DeepVerify do
        kv("outcome", "REFUSED, but not on the window"),
        "  the verifier's own words:"
      ] ++ wrap(error_message(error), "      ", "      "),
-     ["leg [5]: expected an APH_E003 validity-window refusal, got: " <> error_message(error)]}
+     ["leg [5]: expected an APH_E019 validity-window refusal, got: " <> error_message(error)]}
   end
 
   # ----------------------------------------------------------------------
@@ -1017,11 +1017,11 @@ defmodule Mix.Tasks.Demo.DeepVerify do
         "                       base (APH_E001)",
         "  D8   §8.3.1 step 1d  the embedded §6.1 delegation mandate: bound to this",
         "                       human and this agent, its allowedChannels covering",
-        "                       this channel, its window enclosing the envelope's,",
+        "                       this channel, its window enclosing the envelope's (APH_E003),",
         "                       and its OWN two signatures — principalSignature",
         "                       (APH_E011) and notarySignature (APH_E006)",
         "  D9   §8.3 step 6     the validity window against the pinned `now`, 60 s",
-        "                       skew (APH_E003)",
+        "                       skew (APH_E019)",
         "  D10  §8.3 step 8     bodySha256 recomputed over the body bytes AS",
         "                       RECEIVED — never over a re-serialization of a parsed",
         "                       object, because two JSON texts that parse equal can",
@@ -1193,7 +1193,8 @@ defmodule Mix.Tasks.Demo.DeepVerify do
   defp refused_step("APH_E012", _message), do: :d3
   defp refused_step("APH_E006", _message), do: :d8
   defp refused_step("APH_E001", _message), do: :d7
-  defp refused_step("APH_E003", _message), do: :d9
+  defp refused_step("APH_E003", _message), do: :d8
+  defp refused_step("APH_E019", _message), do: :d9
   defp refused_step("APH_E009", _message), do: :d10
   defp refused_step("APH_E008", _message), do: :d11
 

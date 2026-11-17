@@ -34,8 +34,8 @@ defmodule Demo.DeepVerifier.TsSidecar do
 
   - `:now` is **required**. This module reads no clock either, and neither
     end of the seam will invent one. The golden's window is
-    `2026-05-21T00:00:00Z .. 2026-05-22T00:00:00Z`; the aph testkit's own
-    pinned instant inside it is `2026-05-21T12:00:00Z`
+    `2026-05-21T00:00:00Z .. 2026-05-21T00:10:00Z`; the aph testkit's own
+    pinned instant inside it is `2026-05-21T00:05:00Z`
     (`interpreters/typescript/testkit/golden.ts`,
     `GOLDEN_EVALUATION_INSTANT`).
   - `:keys` is **refused**. The sidecar supplies exactly one key — the
@@ -70,7 +70,7 @@ defmodule Demo.DeepVerifier.TsSidecar do
           fetched: []
         },
         transport: %{envelope_bytes: 3382, body_bytes: 427},
-        evaluated_at: "2026-05-21T12:00:00Z",
+        evaluated_at: "2026-05-21T00:05:00Z",
         require_mode: "PrincipalSigned",
         verifier: %{runtime: "v26.3.0", dist: "…/interpreters/typescript/dist"}
       }

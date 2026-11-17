@@ -66,7 +66,7 @@ defmodule Demo.Corpus do
   pinned. `mix demo.deep_verify` pins the same instant for the same reason.
   """
   @spec pinned_now() :: String.t()
-  def pinned_now, do: "2026-05-21T12:00:00Z"
+  def pinned_now, do: "2026-05-21T00:05:00Z"
 
   @doc """
   The resolved aph repo path, validated to look like an aph clone.

@@ -28,7 +28,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, nightly]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -47,7 +47,7 @@ env:
   # fetched, and this drift gate decides whether its bytes are the recorded
   # ones. A mismatch fails the gate below, which is the point of the pin
   # rather than a nuisance it causes (PRD-001 acceptance gate 6).
-  APH_PIN: 9b94ec13b7a5ada079e661e068734736e20ae9eb
+  APH_PIN: 63fa269a35db70d8e0c86d87d499cbd23fb88147
 
 jobs:
   core:
@@ -211,13 +211,13 @@ jobs:
           sums="$RUNNER_TEMP/aph-fixtures.sha256"
           {
             printf '%s  %s\n' \
-              8a6015d873786b533fa00f16b3f789a7984be61d631d5cd9e3515f7c5e721466 \
+              473265e53461a62d1043cc4ca25935f968e36cf6c7cdfb18bdcb18cd1cd9a093 \
               examples/principal_signed_envelope.json
             printf '%s  %s\n' \
               dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb \
               examples/principal_signed_body.txt
             printf '%s  %s\n' \
-              b8ffb64d42682db4406cc0c25d4c15f52c23eaff7da456aad5d82c6fb71a3640 \
+              797867ae22e11f5b925fadab50f80589b0dafbf4b69801be1e6d03688f45f9b5 \
               examples/slack_reply_envelope.json
           } > "$sums"
 
@@ -438,7 +438,7 @@ jobs:
           sums="$RUNNER_TEMP/aph-fixtures.sha256"
           {
             printf '%s  %s\n' \
-              8a6015d873786b533fa00f16b3f789a7984be61d631d5cd9e3515f7c5e721466 \
+              473265e53461a62d1043cc4ca25935f968e36cf6c7cdfb18bdcb18cd1cd9a093 \
               examples/principal_signed_envelope.json
             printf '%s  %s\n' \
               dae0b23f649c05222b955ff4752507c6d85a51e00566da4fea1867e50b3b60cb \
@@ -524,9 +524,9 @@ jobs:
 
           needles=(
             "[1] PROVENANCE"
-            "pinned now            2026-05-21T12:00:00Z"
+            "pinned now            2026-05-21T00:05:00Z"
             '`now` is pinned because the window is fixed, not because time is negotiable.'
-            "APH_E003 (MandateExpired)"
+            "APH_E019 (EnvelopeWindowInvalid)"
             "outside the envelope window"
             "APH_E011 (PrincipalSignatureInvalid)"
             "This is why structural validity is never called verification."
